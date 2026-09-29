@@ -60,7 +60,12 @@ impl PluginState {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "operation", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "operation",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum Operation {
     GetCredentials {
         account_id: String,
@@ -339,4 +344,51 @@ fn now() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Operation, operation_request};
+    use serde_json::json;
+
+    #[test]
+    fn decodes_start_task_payload_with_camel_case_fields() {
+        let payload = json!({
+            "operation": "startTask",
+            "text": "test@example.invalid----invalid-password----JBSWY3DPEHPK3PXP",
+            "submissionId": "58bc8ea3-1c36-4a70-aff4-f7ba6402403e",
+            "settings": {
+                "enabled": true,
+                "concurrencyLimit": null,
+                "weight": 1,
+                "groupIds": []
+            }
+        });
+
+        let operation: Operation = match serde_json::from_value(payload) {
+            Ok(operation) => operation,
+            Err(error) => panic!("startTask payload: {error}"),
+        };
+        let result = operation_request(operation);
+        assert!(result.is_ok(), "worker request should be accepted");
+        let (method, path, body) = result.unwrap_or_else(|_| unreachable!());
+
+        assert_eq!(method, "POST");
+        assert_eq!(path, "api/tasks");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body)
+                .unwrap_or_else(|error| { panic!("worker body: {error}") }),
+            json!({
+                "text": "test@example.invalid----invalid-password----JBSWY3DPEHPK3PXP",
+                "submissionId": "58bc8ea3-1c36-4a70-aff4-f7ba6402403e",
+                "settings": {
+                    "enabled": true,
+                    "concurrencyLimit": null,
+                    "weight": 1,
+                    "groupIds": []
+                },
+                "outboundProxyId": null
+            })
+        );
+    }
 }

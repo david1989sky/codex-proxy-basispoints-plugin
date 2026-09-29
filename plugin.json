@@ -3,7 +3,7 @@
   "name": "codex-proxy-twofa",
   "displayName": "批量 2FA 授权",
   "publisher": "david1989sky",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Codex Proxy RS 批量 2FA 导入与自动授权 companion 插件",
   "license": "Apache-2.0",
   "author": "david1989sky",

@@ -1,7 +1,7 @@
 {
   "name": "@david1989sky/codex-proxy-twofa-frontend",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "packageManager": "pnpm@12.6.0",
   "engines": {
