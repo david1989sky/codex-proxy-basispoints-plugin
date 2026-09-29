@@ -89,6 +89,9 @@ impl WorkerClient {
                 builder = builder.header(header.name.as_str(), value);
             }
         }
+        if let Some(content_type) = request.content_type.as_deref() {
+            builder = builder.header(reqwest::header::CONTENT_TYPE, content_type);
+        }
         if !payload.is_empty() {
             builder = builder.body(payload.to_vec());
         }
@@ -177,7 +180,10 @@ fn unwrap_worker_body(status: StatusCode, bytes: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+
     use super::{unwrap_worker_body, worker_path};
+    use gateway_plugin_sdk::call::management::ManagementRequest;
     use reqwest::StatusCode;
 
     #[test]
@@ -207,5 +213,42 @@ mod tests {
                 .unwrap()
                 .contains("来源验证失败")
         );
+    }
+
+    #[tokio::test]
+    async fn forwards_json_content_type_to_worker() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let size = stream.read(&mut chunk).expect("read request");
+                if size == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..size]);
+            }
+            let request = String::from_utf8(request).expect("request headers");
+            assert!(request.contains("content-type: application/json"));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .expect("response");
+        });
+
+        let client =
+            super::WorkerClient::new(&format!("http://127.0.0.1:{port}")).expect("worker client");
+        let request = ManagementRequest {
+            method: "POST".to_owned(),
+            path: "api/tasks".to_owned(),
+            query: String::new(),
+            content_type: Some("application/json".to_owned()),
+            headers: Vec::new(),
+        };
+        let response = client.forward(&request, br#"{}"#).await.expect("response");
+
+        assert_eq!(response.status, StatusCode::OK.as_u16());
+        server.join().expect("server");
     }
 }
