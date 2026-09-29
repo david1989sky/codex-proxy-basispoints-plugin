@@ -25,6 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: x86_64-unknown-linux-gnu
+          components: rustfmt, clippy
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend run typecheck
       - run: pnpm --dir frontend run lint
@@ -52,6 +53,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: x86_64-unknown-linux-gnu
+          components: rustfmt, clippy
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
