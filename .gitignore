@@ -1,0 +1,10 @@
+/target/
+/frontend/node_modules/
+/frontend/dist/
+/worker/node_modules/
+/dist/
+/.worktrees/
+.DS_Store
+*.log
+.env
+.env.*
