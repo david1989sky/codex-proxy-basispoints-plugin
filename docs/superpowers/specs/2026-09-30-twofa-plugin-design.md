@@ -19,18 +19,14 @@
 
 ## 管理接口与页面
 
-管理桥提供与现有功能等价的接口，所有响应正文由插件定义：
+管理桥注册三个静态插件路由，页面通过 `api/request` 的受校验操作体使用等价的功能；所有响应正文由插件定义：
 
 - `GET /status`：返回 Worker 就绪状态、迁移状态和当前任务数量，不返回凭据
-- `GET /accounts/:accountId/credentials`：返回是否已保存及更新时间
-- `DELETE /accounts/:accountId/credentials`：清除对应加密凭据
-- `POST /accounts/:accountId/reauthorize`：使用已保存内容或一次性导入内容创建重新授权任务
-- `POST /tasks`：创建批量 2FA 任务
-- `GET /tasks/:taskId`：读取任务进度、脱敏账号状态和失败信息
-- `GET /tasks/:taskId/items/:itemId/screen`：获取人工验证截图
-- `POST /tasks/:taskId/items/:itemId/input`：提交人工验证输入
-- `POST /tasks/:taskId/cancel`、`POST /tasks/:taskId/retry`：控制任务
+- `GET /status`：返回 Worker 就绪状态、迁移状态和当前任务数量，不返回凭据
 - `GET /migration`、`POST /migration/import`：检查和执行旧 Worker 数据迁移
+- `POST /request`：请求体包含受限的 `operation`、账号或任务 ID 和业务数据，桥接到对应的 Worker 路由
+
+RS 插件管理路由本身只支持静态路径，因此不会声明 `:accountId` 或 `:taskId` 动态路由。`api/request` 只允许预先列出的操作名和字段，禁止任意 URL、查询参数和未声明的 Worker 路径。
 
 管理页面包含批量导入、任务进度、人工验证、已保存凭据状态、重新授权和迁移状态。页面不能读取管理 Cookie、插件密钥、任意 URL 或宿主 Vue 实例；静态资源和页面入口都由插件清单声明。
 

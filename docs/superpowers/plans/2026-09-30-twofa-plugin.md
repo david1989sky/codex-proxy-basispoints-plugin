@@ -72,11 +72,11 @@
 
 - [ ] **Step 3: Register the plugin management routes.**
 
-  Register relative routes `api/status`, `api/migration`, `api/accounts/{accountId}/credentials` GET/DELETE, `api/accounts/{accountId}/reauthorize` POST, `api/tasks` POST, `api/tasks/{taskId}` GET/DELETE, `api/tasks/{taskId}/cancel` POST, `api/tasks/{taskId}/retry` POST, `api/tasks/{taskId}/items/{itemId}/screen` GET, and `api/tasks/{taskId}/items/{itemId}/input` POST. Register the three page resources and one management page.
+  Register only the static relative routes `api/status`, `api/migration`, `api/migration/import`, and `api/request` POST, plus the three page resources and one management page. The request body carries a closed `operation` enum and bounded IDs/data because the RS management contract does not support dynamic `:id` route declarations.
 
 - [ ] **Step 4: Implement route validation and error mapping.**
 
-  Reject query parameters, unsupported content types, control characters in path segments, bodies above the limit, and requests without the authenticated management headers. Translate Worker 401/403/404/409/413/5xx responses to stable plugin errors. Return `Cache-Control: no-store` and JSON content type for API responses; return image data only for the screenshot route.
+  Reject query parameters, unsupported content types, unknown operations, unbounded IDs, control characters, bodies above the limit, and requests without the authenticated management headers. Translate Worker 401/403/404/409/413/5xx responses to stable plugin errors. Return `Cache-Control: no-store` and JSON content type for API responses; screenshot data remains a JSON data URL inside the bounded response.
 
 - [ ] **Step 5: Implement migration/status semantics without moving the vault in the first release.**
 
