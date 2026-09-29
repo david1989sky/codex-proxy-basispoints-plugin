@@ -8,12 +8,12 @@
 
 插件包由四部分组成：
 
-1. Rust 插件宿主 `cpr-twofa-plugin` 使用官方 `gateway-plugin-sdk` 注册管理路由、隔离管理页面、日志和私有状态，并负责 Worker 的生命周期
-2. Node/Playwright Worker 保留当前已经验证的授权流程，包括批量任务、人工验证、重试、取消、账号关联和加密凭据保存
+1. Rust 插件宿主 `cpr-twofa-plugin` 使用官方 `gateway-plugin-sdk` 注册管理路由、隔离管理页面、日志和私有状态，并负责 companion Worker 的版本检查与生命周期状态
+2. Node/Playwright Worker 作为同一 GitHub Release 发布的 companion 容器，保留当前已经验证的授权流程，包括批量任务、人工验证、重试、取消、账号关联和加密凭据保存
 3. Vue 管理页面运行在 RS 提供的隔离 iframe 中，只通过 `window.codexProxyPlugin.request` 调用插件管理路由，并继承宿主主题
 4. `plugin.json`、资源映射和 GitHub Actions 发布脚本负责声明兼容范围、打包资源、生成安装归档与 SHA-256 校验文件
 
-插件主进程以插件包目录为当前工作目录，通过固定的插件资源路径启动 Worker。Node 运行时、Playwright 依赖和 Chromium 运行资源随 `x86_64-unknown-linux-gnu` 包固定发布，避免生产主机环境变化导致授权失败。插件数据不写入临时制品目录，使用稳定的插件私有数据目录；制品切换不会丢失 Worker 状态。
+官方插件 CLI 限制单个安装包压缩后 32 MiB、展开后 128 MiB，无法安全容纳 Chromium。因此插件包只包含 Rust 插件宿主和管理页面；Playwright Worker 以固定摘要的 companion 容器运行，浏览器环境继续使用已经验证的 Playwright 镜像。插件只接受本机受保护的 Worker 地址和版本摘要，制品切换不会丢失 Worker 状态。
 
 插件不修改宿主 Core、Admin 或 Store，也不直接访问 PostgreSQL。账号、密钥、模型和私有状态通过官方 SDK 回调访问；插件安装即表示安装者信任插件进程的系统权限，插件机制不提供 OS 沙箱。
 
@@ -38,15 +38,15 @@
 
 邮箱密码和 TOTP 密钥继续使用 AES-256-GCM 加密。密钥与密文分离保存；任何管理响应、日志、截图、GitHub 文件和插件清单都不包含明文凭据。
 
-首次启用时执行一次性迁移：读取旧 Worker 的加密凭据目录和密钥，校验格式与权限，将记录导入插件私有数据；迁移标记包含源版本、记录数量和完成时间，重复执行不会覆盖已存在的新记录。迁移失败保持旧数据不变，页面显示可重试的错误。
+首次启用时由 companion 部署脚本执行一次性迁移：校验旧 Worker 的加密凭据目录和密钥权限，保留原路径备份并将数据挂载到 companion Worker；插件状态记录源版本、记录数量和完成时间，重复执行不会覆盖新数据。迁移失败保持旧数据和旧 Worker 不变，页面显示可重试的错误。
 
 任务元数据和迁移标记使用插件声明的私有状态命名空间，并以精确版本更新避免并发覆盖。加密凭据使用插件私有加密存储，更新和回滚只切换代码与配置，不删除凭据。停用保留所有数据；删除配置或卸载前明确告知删除范围。
 
 ## 生命周期、更新与回滚
 
-插件安装后由宿主准备默认配置和资源，插件主进程负责启动 Worker 并报告就绪状态。停用时先停止接受新任务，再取消或排空运行任务，最后关闭 Worker。Worker 异常退出只影响插件实例，RS 其他转发和管理功能继续运行。
+插件安装后由宿主准备默认配置和资源，插件主进程负责校验 companion Worker 的地址、版本摘要和就绪状态。停用时先停止接受新任务，再由 companion 运维脚本取消或排空运行任务，最后停用插件入口。Worker 异常退出只影响插件实例，RS 其他转发和管理功能继续运行。
 
-GitHub 更新流程为：检查稳定 Release、下载并校验 `.tar.gz` 与 `.sha256`、解析插件清单、确认兼容范围、保留当前配置和状态、切换新制品、启动新 Worker。新版本启动或迁移失败时保留旧实例和旧数据，并允许从已安装版本回滚。版本号使用明确的新版本，不覆盖已发布制品。
+GitHub 更新流程为：检查稳定 Release、下载并校验插件 `.tar.gz` 与 `.sha256`、解析插件清单、确认兼容范围、保留当前配置和状态、切换插件制品，再按同一 Release 的 Worker 镜像摘要执行 companion 更新。新版本桥接或 Worker 健康检查失败时保留旧插件、旧 Worker 和旧数据，并允许从已安装版本回滚。版本号使用明确的新版本，不覆盖已发布制品。
 
 ## 工程结构
 
@@ -69,9 +69,12 @@ docs/
   install.md
   migration.md
 .github/workflows/release.yml
+ops/
+  companion-install.sh
+  companion-update.sh
 ```
 
-插件后台只依赖公开 SDK，不从宿主源码跨仓导入。Worker 的管理协议由 Rust 桥接层统一封装，前端不直接依赖旧 `/api/admin/twofa` 路由。发布脚本调用目标版本的 `cpr-plugin package`，不把源码归档或页面目录误当安装包。
+插件后台只依赖公开 SDK，不从宿主源码跨仓导入。Worker 的管理协议由 Rust 桥接层统一封装，前端不直接依赖旧 `/api/admin/twofa` 路由。发布脚本调用目标版本的 `cpr-plugin package`，并同时生成 companion 镜像摘要和更新清单；不把源码归档或页面目录误当安装包。
 
 ## 验证与交付
 
@@ -81,7 +84,7 @@ docs/
 - 前端 `pnpm install --frozen-lockfile`、`pnpm run typecheck`、`pnpm run lint`、`pnpm run build`
 - Worker 的单元测试和不使用真实凭据的浏览器流程测试
 - 插件 CLI 清单校验、目标平台打包、包内文件清单和 SHA-256 校验
-- 本地 RS `3.18.1` 安装测试：安装、启用、管理页面、迁移、任务控制、停用、更新和回滚
+- 本地 RS `3.18.1` 安装测试：安装、启用、管理页面、companion 健康检查、迁移、任务控制、停用、更新和回滚
 
 生产验证只使用用户已有授权和虚构测试输入，不输出真实凭据。发布完成后从 GitHub 公开 Release 下载附件重新校验，再在生产 RS 插件管理中安装；插件真实生效必须以管理页面、Worker 就绪、迁移结果和一条受控授权任务共同确认。
 
