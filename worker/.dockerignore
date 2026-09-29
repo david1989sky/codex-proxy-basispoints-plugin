@@ -1,0 +1,8 @@
+node_modules
+.env
+.env.*
+data
+secrets
+*.log
+test
+ops/probe.py

@@ -1,0 +1,39 @@
+services:
+  worker:
+    image: ${WORKER_IMAGE:?WORKER_IMAGE must be an immutable GHCR image reference}
+    container_name: cpr-twofa-worker
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    read_only: true
+    volumes:
+      - type: bind
+        source: /opt/cpr-twofa/data/credentials
+        target: /data/credentials
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/cpr-twofa/secrets/twofa-key
+        target: /run/secrets/twofa-key
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    shm_size: 512m
+    mem_limit: 2g
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+      CPR_BASE_URL: http://127.0.0.1:28080
+      PORT: '28082'
+      BROWSER_HEADLESS: ${BROWSER_HEADLESS:-false}
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'

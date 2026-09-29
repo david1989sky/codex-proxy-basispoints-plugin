@@ -1,0 +1,61 @@
+{
+  "manifestVersion": 2,
+  "name": "codex-proxy-twofa",
+  "displayName": "批量 2FA 授权",
+  "publisher": "david1989sky",
+  "version": "0.1.0",
+  "description": "Codex Proxy RS 批量 2FA 导入与自动授权 companion 插件",
+  "license": "Apache-2.0",
+  "author": "david1989sky",
+  "engines": {
+    "codex-proxy-rs": ">=3.18.1, <4.0.0"
+  },
+  "main": "bin/plugin",
+  "runtime": "trustedProcess",
+  "contributes": {
+    "management": {}
+  },
+  "configurationSchema": {
+    "type": "object",
+    "properties": {
+      "workerBaseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:28082",
+        "pattern": "^http://127\\.0\\.0\\.1(?::[0-9]{1,5})?$",
+        "maxLength": 64
+      },
+      "workerImageDigest": {
+        "type": "string",
+        "default": "",
+        "maxLength": 256
+      }
+    },
+    "additionalProperties": false
+  },
+  "resources": {
+    "web/index.html": "text/html",
+    "web/app.js": "text/javascript",
+    "web/app.css": "text/css"
+  },
+  "state": [
+    {
+      "namespace": "twofa",
+      "schemaVersion": 1,
+      "schema": {
+        "type": "object",
+        "required": ["migrationVersion", "legacyVaultMounted", "updatedAt"],
+        "properties": {
+          "migrationVersion": { "type": "string", "maxLength": 64 },
+          "legacyVaultMounted": { "type": "boolean" },
+          "recordCount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+          "updatedAt": { "type": "string", "maxLength": 64 }
+        },
+        "additionalProperties": false
+      },
+      "maximumRecords": 1,
+      "maximumBytes": 8192,
+      "maximumValueBytes": 8192,
+      "migratesFrom": []
+    }
+  ]
+}
