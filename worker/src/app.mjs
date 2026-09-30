@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import Fastify from 'fastify'
 import { Jobs, parseAccounts, PublicError } from './core.mjs'
+import { requestBasispoints } from './basispoints.mjs'
 
 const prefix = '/api/admin/twofa'
 const settingsSchema = {
@@ -48,7 +49,7 @@ async function resolveProxy(id, cookie, upstream, proxyMap, requireTest = true) 
   throw new PublicError(400, '所选代理不存在')
 }
 
-export async function createApp({ origin, upstream, run, vault, proxyMap = {}, leaseMs }) {
+export async function createApp({ origin, upstream, run, vault, proxyMap = {}, leaseMs, basispointsFetch = fetch }) {
   const app = Fastify({ logger: false, bodyLimit: 140000, disableRequestLogging: true, ajv: { customOptions: { removeAdditional: false } } })
   const accountOperations = new Set()
   async function withAccountLock(id, action) {
@@ -116,6 +117,16 @@ export async function createApp({ origin, upstream, run, vault, proxyMap = {}, l
   })
   const ok = data => ({ code: 200, message: 'ok', data })
   app.get('/health', () => ok({ ready: true }))
+  app.post('/api/basispoints/responses', { schema: { body: {
+    type: 'object', additionalProperties: false, required: ['accountId', 'request'],
+    properties: { accountId: { type: 'string', minLength: 1, maxLength: 128 }, request: { type: 'object', additionalProperties: true } },
+  } } }, async (request, reply) => {
+    const result = await requestBasispoints({
+      accountId: request.body.accountId, request: request.body.request, cookie: request.sessionCookie,
+      origin, upstream, fetchImpl: basispointsFetch,
+    })
+    return reply.code(result.status).type(result.contentType).send(result.body)
+  })
   const accountParams = { type: 'object', required: ['accountId'], properties: { accountId: { type: 'string', minLength: 1, maxLength: 128 } } }
   app.get(`${prefix}/accounts/:accountId`, { schema: { params: accountParams } }, async request => {
     requireVault()

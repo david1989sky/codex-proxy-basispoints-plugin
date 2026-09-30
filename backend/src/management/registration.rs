@@ -22,6 +22,15 @@ pub(crate) fn registration() -> ManagementRegistration {
             get("api/migration"),
             post("api/migration/import"),
             post("api/request"),
+            ManagementRoute {
+                method: "POST".to_owned(),
+                path: "api/basispoints/responses".to_owned(),
+                request_content_types: vec![JSON_CONTENT_TYPE.to_owned()],
+                response_content_types: vec![
+                    JSON_CONTENT_TYPE.to_owned(),
+                    "text/event-stream".to_owned(),
+                ],
+            },
         ],
         resources: ["web/index.html", "web/app.js", "web/app.css"]
             .into_iter()
@@ -38,5 +47,26 @@ pub(crate) fn registration() -> ManagementRegistration {
             icon: None,
         }],
         callbacks: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::registration;
+
+    #[test]
+    fn registers_basispoints_responses_route_contract() {
+        let registration = registration();
+        let route = registration
+            .routes
+            .iter()
+            .find(|route| route.method == "POST" && route.path == "api/basispoints/responses")
+            .expect("Basis Points route");
+
+        assert_eq!(route.request_content_types, vec!["application/json"]);
+        assert_eq!(
+            route.response_content_types,
+            vec!["application/json", "text/event-stream"]
+        );
     }
 }

@@ -71,9 +71,32 @@ pub(super) fn raw_json(
     status: u16,
     body: Vec<u8>,
 ) -> Result<TypedReply<ManagementResponse>, PluginFault> {
+    raw_response(status, JSON_CONTENT_TYPE, body)
+        .map_err(|_| PluginFault::new(ErrorCode::Fault, "管理接口响应编码失败"))
+}
+
+pub(super) fn raw_response(
+    status: u16,
+    content_type: &str,
+    body: Vec<u8>,
+) -> Result<TypedReply<ManagementResponse>, ApiError> {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .map(str::trim)
+        .unwrap_or_default();
+    if !media_type.eq_ignore_ascii_case("application/json")
+        && !media_type.eq_ignore_ascii_case("text/event-stream")
+    {
+        return Err(ApiError::new(
+            502,
+            "worker_response",
+            "Worker 返回了不支持的内容类型",
+        ));
+    }
     Ok(TypedReply::new(ManagementResponse {
         status,
-        content_type: JSON_CONTENT_TYPE.to_owned(),
+        content_type: content_type.to_owned(),
         headers: vec![
             gateway_plugin_sdk::call::middleware::MiddlewareHeader {
                 name: "Cache-Control".to_owned(),
@@ -109,4 +132,42 @@ pub(super) fn encode(
         ],
     })
     .with_payload(payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::raw_response;
+
+    #[test]
+    fn preserves_allowed_sse_content_type_and_security_headers() {
+        let reply = match raw_response(
+            200,
+            "Text/Event-Stream; charset=utf-8",
+            b"data: hello\n\n".to_vec(),
+        ) {
+            Ok(reply) => reply,
+            Err(_) => panic!("SSE response should be accepted"),
+        };
+
+        assert_eq!(
+            reply.result.content_type,
+            "Text/Event-Stream; charset=utf-8"
+        );
+        assert_eq!(reply.result.status, 200);
+        assert_eq!(reply.payload, b"data: hello\n\n");
+        assert_eq!(reply.result.headers.len(), 2);
+    }
+
+    #[test]
+    fn rejects_unallowlisted_content_types() {
+        let result = raw_response(200, "text/plain", b"secret".to_vec());
+        let error = match result {
+            Ok(_) => panic!("text/plain must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, 502);
+        assert_eq!(error.code, "worker_response");
+        assert_eq!(error.message, "Worker 返回了不支持的内容类型");
+    }
 }

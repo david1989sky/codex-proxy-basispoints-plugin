@@ -14,10 +14,10 @@ use gateway_plugin_sdk::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::worker_client::{WorkerClient, WorkerResponse};
+use crate::worker_client::{WorkerClient, WorkerError, WorkerResponse};
 
 use super::{
-    response::{ApiError, ApiResult, json_reply, raw_json},
+    response::{ApiError, ApiResult, json_reply, raw_json, raw_response},
     validation::{
         MAXIMUM_BODY_BYTES, bounded_id, decode_json, require_empty_object, require_no_query,
     },
@@ -43,6 +43,13 @@ struct MigrationState {
     legacy_vault_mounted: bool,
     record_count: u32,
     updated_at: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BasispointsRequest {
+    account_id: String,
+    request: Value,
 }
 
 const MIGRATION_NAMESPACE: &str = "twofa";
@@ -123,6 +130,7 @@ async fn route(state: PluginState, call: TypedCall<ManagementRequest>) -> ApiRes
         ("GET", "api/status") => status(state).await,
         ("GET", "api/migration") => migration(state, call).await,
         ("POST", "api/migration/import") => import_migration(state, call).await,
+        ("POST", "api/basispoints/responses") => basispoints_responses(state, call).await,
         ("POST", "api/request") => request(state, call).await,
         _ => Err(ApiError::new(404, "not_found", "未找到插件管理接口")),
     }
@@ -223,6 +231,51 @@ async fn request(state: PluginState, call: TypedCall<ManagementRequest>) -> ApiR
         .await
         .map_err(|error| ApiError::from_worker(503, error.to_string()))?;
     forward_response(response)
+}
+
+async fn basispoints_responses(
+    state: PluginState,
+    call: TypedCall<ManagementRequest>,
+) -> ApiResult {
+    let wrapper: BasispointsRequest = decode_json(&call)?;
+    if !bounded_id(&wrapper.account_id) {
+        return Err(ApiError::invalid("宿主账号标识无效"));
+    }
+    if !wrapper.request.is_object() {
+        return Err(ApiError::invalid("Responses 请求必须是 JSON 对象"));
+    }
+    let body =
+        serde_json::to_vec(&wrapper).map_err(|_| ApiError::new(500, "encoding", "请求编码失败"))?;
+    let synthetic = ManagementRequest {
+        method: "POST".to_owned(),
+        path: "api/basispoints/responses".to_owned(),
+        query: String::new(),
+        content_type: Some("application/json".to_owned()),
+        headers: call.request.headers,
+    };
+    let response = state
+        .worker
+        .forward(&synthetic, &body)
+        .await
+        .map_err(map_basispoints_worker_error)?;
+    raw_response(response.status, &response.content_type, response.body)
+}
+
+fn map_basispoints_worker_error(error: WorkerError) -> ApiError {
+    match error {
+        WorkerError::RequestTooLarge => {
+            ApiError::new(413, "payload_too_large", "请求正文超过 Worker 限制")
+        }
+        WorkerError::ResponseTooLarge => {
+            ApiError::new(502, "worker_response", "Worker 响应超过插件限制")
+        }
+        WorkerError::InvalidBaseUrl
+        | WorkerError::InvalidPath
+        | WorkerError::Transport
+        | WorkerError::InvalidResponse => {
+            ApiError::new(503, "worker_unavailable", "Worker 暂时不可用")
+        }
+    }
 }
 
 fn operation_request(operation: Operation) -> Result<(&'static str, String, Vec<u8>), ApiError> {
@@ -350,6 +403,31 @@ fn now() -> String {
 mod tests {
     use super::{Operation, operation_request};
     use serde_json::json;
+
+    #[test]
+    fn rejects_malformed_basispoints_wrapper_before_forwarding() {
+        let unknown_field = serde_json::from_value::<super::BasispointsRequest>(json!({
+            "accountId": "acct-1",
+            "request": {},
+            "unexpected": true,
+        }));
+        assert!(unknown_field.is_err());
+
+        let scalar_request = serde_json::from_value::<super::BasispointsRequest>(json!({
+            "accountId": "acct-1",
+            "request": "not-an-object",
+        }))
+        .expect("wrapper itself should decode");
+        assert!(!scalar_request.request.is_object());
+    }
+
+    #[test]
+    fn operation_request_rejects_invalid_identifier() {
+        let operation = Operation::GetTask {
+            task_id: "invalid id".to_owned(),
+        };
+        assert!(operation_request(operation).is_err());
+    }
 
     #[test]
     fn decodes_start_task_payload_with_camel_case_fields() {

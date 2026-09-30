@@ -95,7 +95,7 @@ impl WorkerClient {
         if !payload.is_empty() {
             builder = builder.body(payload.to_vec());
         }
-        let response = builder.send().await.map_err(|_| WorkerError::Transport)?;
+        let mut response = builder.send().await.map_err(|_| WorkerError::Transport)?;
         let status = response.status();
         let content_type = response
             .headers()
@@ -103,14 +103,28 @@ impl WorkerClient {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("application/json")
             .to_owned();
-        let bytes = response.bytes().await.map_err(|_| WorkerError::Transport)?;
-        if bytes.len() > MAXIMUM_RESPONSE_BYTES {
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAXIMUM_RESPONSE_BYTES as u64)
+        {
             return Err(WorkerError::ResponseTooLarge);
         }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| WorkerError::Transport)? {
+            if chunk.len() > MAXIMUM_RESPONSE_BYTES.saturating_sub(bytes.len()) {
+                return Err(WorkerError::ResponseTooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = if path == "/api/basispoints/responses" {
+            bytes
+        } else {
+            unwrap_worker_body(status, &bytes)
+        };
         Ok(WorkerResponse {
             status: status.as_u16(),
             content_type,
-            body: unwrap_worker_body(status, &bytes),
+            body,
         })
     }
 
@@ -133,6 +147,9 @@ impl WorkerClient {
 fn worker_path(method: &str, path: &str) -> Option<String> {
     if method == "GET" && path == "api/status" {
         return Some("/health".to_owned());
+    }
+    if method == "POST" && path == "api/basispoints/responses" {
+        return Some("/api/basispoints/responses".to_owned());
     }
     if path == "api/migration" || path == "api/migration/import" {
         return None;
@@ -189,6 +206,11 @@ mod tests {
     #[test]
     fn maps_only_supported_worker_paths() {
         assert_eq!(worker_path("GET", "api/status"), Some("/health".to_owned()));
+        assert_eq!(
+            worker_path("POST", "api/basispoints/responses"),
+            Some("/api/basispoints/responses".to_owned())
+        );
+        assert_eq!(worker_path("GET", "api/basispoints/responses"), None);
         assert_eq!(
             worker_path("GET", "api/accounts/a/credentials"),
             Some("/api/admin/twofa/accounts/a".to_owned())
@@ -249,6 +271,86 @@ mod tests {
         let response = client.forward(&request, br#"{}"#).await.expect("response");
 
         assert_eq!(response.status, StatusCode::OK.as_u16());
+        server.join().expect("server");
+    }
+
+    #[tokio::test]
+    async fn preserves_raw_basispoints_response_body() {
+        let expected_body = br#"{"code":200,"data":{"ready":true}}"#;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let size = stream.read(&mut chunk).expect("read request");
+                if size == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..size]);
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                expected_body.len(),
+                String::from_utf8_lossy(expected_body)
+            );
+            stream.write_all(response.as_bytes()).expect("response");
+        });
+
+        let client =
+            super::WorkerClient::new(&format!("http://127.0.0.1:{port}")).expect("worker client");
+        let request = ManagementRequest {
+            method: "POST".to_owned(),
+            path: "api/basispoints/responses".to_owned(),
+            query: String::new(),
+            content_type: Some("application/json".to_owned()),
+            headers: Vec::new(),
+        };
+        let response = client
+            .forward(&request, br#"{"accountId":"acct-1","request":{}}"#)
+            .await
+            .expect("response");
+
+        assert_eq!(response.status, StatusCode::OK.as_u16());
+        assert_eq!(response.body, expected_body);
+        server.join().expect("server");
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_worker_response_before_buffering() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let size = stream.read(&mut chunk).expect("read request");
+                if size == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..size]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2097153\r\nConnection: close\r\n\r\n")
+                .expect("response");
+        });
+
+        let client =
+            super::WorkerClient::new(&format!("http://127.0.0.1:{port}")).expect("worker client");
+        let request = ManagementRequest {
+            method: "POST".to_owned(),
+            path: "api/basispoints/responses".to_owned(),
+            query: String::new(),
+            content_type: Some("application/json".to_owned()),
+            headers: Vec::new(),
+        };
+        let result = client
+            .forward(&request, br#"{"accountId":"acct-1","request":{}}"#)
+            .await;
+
+        assert!(matches!(result, Err(super::WorkerError::ResponseTooLarge)));
         server.join().expect("server");
     }
 }

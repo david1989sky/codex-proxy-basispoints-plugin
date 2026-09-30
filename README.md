@@ -48,3 +48,21 @@ PLUGIN_CLI="$PWD/.tools/bin/cpr-plugin" bash scripts/package.sh
 插件安装代表信任插件进程。RS 插件机制不提供操作系统级沙箱；插件不会读取 PostgreSQL，也不会把密码、TOTP、密钥或真实截图提交到 GitHub。
 
 详细更新、备份和回滚步骤见 [docs/install.md](docs/install.md)，迁移语义见 [docs/migration.md](docs/migration.md)。
+
+## Basis Points Responses 接口
+
+插件提供受管理员管理会话保护的 `POST api/basispoints/responses` 接口，请求必须使用 `application/json`，正文包装为：
+
+```json
+{
+  "accountId": "宿主账号 ID",
+  "request": {
+    "model": "模型名",
+    "input": "请求内容"
+  }
+}
+```
+
+`accountId` 指宿主中已保存的 OpenAI OAuth 账号，`request` 由 Basis Points Responses 协议定义。接口继承管理会话和来源校验，不接受客户端提交的 access token、目标 URL 或代理设置。插件从宿主受保护的账号导出接口解析 OAuth 凭据，并只向固定的 Basis Points 服务发起请求；凭据不会返回给调用方，也不会写入响应或日志。
+
+成功或上游错误响应会保留上游状态码和正文，允许的响应类型为 `application/json` 与 `text/event-stream`，正文上限为 2 MiB。管理层会添加 `Cache-Control: no-store` 和 `X-Content-Type-Options: nosniff`。

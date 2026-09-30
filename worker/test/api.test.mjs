@@ -17,6 +17,77 @@ const upstream = async (path, cookie) => {
   if (path === '/api/auth/status') return { authenticated: !!cookie, session: { role: cookie.includes('admin') ? 'admin' : 'key' } }
   return {}
 }
+
+function fixtureJwt(payload) {
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url')
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(payload)}.fixture-signature`
+}
+
+test('Basis Points route forwards a bounded raw response without exposing the access token', async t => {
+  const fixtureToken = fixtureJwt({ 'https://api.openai.com/auth': {} })
+  const calls = []
+  let basispointsCalls = 0
+  const routeUpstream = async (path, cookie) => {
+    calls.push({ path, cookie })
+    if (path === '/api/auth/status') return upstream(path, cookie)
+    if (path === '/api/admin/accounts/export?accountIds=acct-1&confirm=export_sensitive_accounts') {
+      return { documents: [{ provider: 'openai', document: { accounts: [{ id: 'acct-1', accountId: 'chatgpt-acct', accessToken: fixtureToken }] } }] }
+    }
+    throw new Error(`unexpected upstream request: ${path}`)
+  }
+  const app = await createApp({
+    origin, upstream: routeUpstream, run: async () => ({}),
+    basispointsFetch: async (url, init) => {
+      basispointsCalls++
+      assert.equal(url, 'https://bps.openai.com/basispoints/api/responses')
+      assert.equal(init.headers.authorization, `Bearer ${fixtureToken}`)
+      assert.deepEqual(JSON.parse(init.body), { model: 'gpt-test', input: 'hello' })
+      return new Response('{"output":"fixture"}', { status: 201, headers: { 'content-type': 'application/json; charset=utf-8' } })
+    },
+  })
+  t.after(() => app.close())
+  const response = await app.inject({
+    method: 'POST', url: '/api/basispoints/responses', headers,
+    payload: { accountId: 'acct-1', request: { model: 'gpt-test', input: 'hello' } },
+  })
+  assert.equal(response.statusCode, 201)
+  assert.equal(response.body, '{"output":"fixture"}')
+  assert.match(response.headers['content-type'], /^application\/json/)
+  assert.equal(basispointsCalls, 1)
+  assert.deepEqual(calls.filter(call => call.path.includes('/api/admin/accounts/export')), [{
+    path: '/api/admin/accounts/export?accountIds=acct-1&confirm=export_sensitive_accounts', cookie: 'cpr_session=admin',
+  }])
+  assert.ok(!response.body.includes(fixtureToken))
+})
+
+test('Basis Points route guards management requests and validates its wrapper before fetching', async t => {
+  let basispointsCalls = 0
+  const app = await createApp({
+    origin, upstream, run: async () => ({}),
+    basispointsFetch: async () => { basispointsCalls++; return new Response('{}', { headers: { 'content-type': 'application/json' } }) },
+  })
+  t.after(() => app.close())
+  const validPayload = { accountId: 'acct-1', request: { model: 'gpt-test' } }
+  for (const requestHeaders of [
+    { origin, 'x-cpr-twofa': '1' },
+    { ...headers, cookie: 'cpr_session=key' },
+    { ...headers, origin: 'https://other.example' },
+    { origin, cookie: headers.cookie },
+  ]) {
+    const response = await app.inject({ method: 'POST', url: '/api/basispoints/responses', headers: requestHeaders, payload: validPayload })
+    assert.ok([401, 403].includes(response.statusCode), `${response.statusCode} for ${JSON.stringify(requestHeaders)}`)
+  }
+  for (const invalidPayload of [
+    { accountId: 'acct-1', request: { model: 'gpt-test' }, extra: true },
+    { accountId: 'acct-1', request: null },
+    { accountId: 'acct-1', request: 'gpt-test' },
+  ]) {
+    const response = await app.inject({ method: 'POST', url: '/api/basispoints/responses', headers, payload: invalidPayload })
+    assert.equal(response.statusCode, 400)
+  }
+  assert.equal(basispointsCalls, 0)
+})
+
 test('admin guard rejects anonymous/key sessions and cross-origin/missing CSRF headers', async t => {
   const app = await createApp({ origin, upstream, run: async () => ({ accountId: 'ok' }) })
   t.after(() => app.close())
