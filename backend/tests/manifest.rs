@@ -9,7 +9,7 @@ fn author_manifest_declares_management_and_private_state() {
         manifest.plugin_id().expect("derived plugin id"),
         "david1989sky.codex-proxy-twofa"
     );
-    assert_eq!(manifest.version.to_string(), "0.1.2");
+    assert_eq!(manifest.version.to_string(), "0.1.5");
     assert_eq!(
         manifest.engines.codex_proxy_rs.to_string(),
         ">=3.18.1, <4.0.0"
