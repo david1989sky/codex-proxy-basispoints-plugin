@@ -35,8 +35,8 @@ Content-Type: application/json
 
 1. Rust 管理层注册 `api/basispoints/responses`，检查 JSON 内容类型、正文大小和请求路径，然后把会话 Cookie、Origin 和请求正文转交给 Worker
 2. Worker 通过管理员会话调用宿主 `GET /api/admin/accounts/export?accountIds=<id>&confirm=export_sensitive_accounts`
-3. Worker 只接受导出结果中与请求 ID 相同的 OpenAI OAuth 文档；拒绝 API key、缺少 `access_token` 或多个/不匹配文档
-4. Worker 对 OAuth access token 的 JWT payload 做结构化 Base64URL 解码，从 `https://api.openai.com/auth.chatgpt_account_id` 读取账号 ID；导出文档的 `account_id` 作为已知用户信息优先值，只有两者都缺失时才拒绝请求，claim 与已知账号冲突时拒绝请求
+3. Worker 展开 `documents[].document.accounts[]`，只接受 provider 为 `openai` 且内部 `id` 与请求 ID 相同的单一账号记录；有 `api_key`、缺少 `access_token` 或多个/不匹配记录时拒绝请求
+4. Worker 对 OAuth access token 的 JWT payload 做结构化 Base64URL 解码，从 `https://api.openai.com/auth.chatgpt_account_id` 读取账号 ID；导出账号的 `accountId` 作为已知用户信息优先值，只有两者都缺失时才拒绝请求，claim 与已知账号冲突时拒绝请求
 5. Worker 将 `request` JSON 发到固定 URL `https://bps.openai.com/basispoints/api/responses`
 6. 请求仅包含固定的 `Authorization: Bearer <access_token>`、`chatgpt-account-id`、`x-openai-account-id`、`x-basispoints-auth-mode: chatgpt` 和 JSON 内容类型。Worker 清理请求完成后的 token 引用，不持久化任何导出内容
 7. Worker 返回有限的状态、Content-Type 和正文，Rust 管理层透传允许的响应类型
@@ -47,7 +47,7 @@ Rust 层继续负责插件路由和统一管理响应；Node Worker 负责宿主
 
 - 管理层缺少管理员会话、Origin 校验失败、正文过大或 JSON 结构错误时，在请求到达 Worker 前返回稳定的 4xx 错误
 - 宿主导出返回未授权、禁止访问、账号不存在或非 OAuth 账号时，不返回导出文档；只返回面向调用方的短错误
-- JWT 不是合法的两段 payload、payload 不是 object、用户信息与 claim 都没有账号 ID，或 claim 与宿主 `account_id` 冲突时返回 400
+- JWT 不是合法的三段 payload、payload 不是 object、用户信息与 claim 都没有账号 ID，或 claim 与宿主 `accountId` 冲突时返回 400
 - Basis Points 非 2xx 响应返回其状态码和有界正文；传输失败或正文超限返回 502/413 类稳定错误，不包含 Authorization 头或 token 内容
 - 日志、任务状态、迁移状态、截图和前端响应都不能包含 access token、refresh token、id token 或账号导出文档
 - 请求只允许固定 Basis Points URL；不允许 SSRF、用户代理、额外上游头或把 token 转发给其他地址

@@ -43,9 +43,9 @@ function fixtureOptions({ authentication_kind = 'oauth', access_token, account_i
   const token = access_token ?? fixtureJwt({ 'https://api.openai.com/auth': tokenClaim })
   return {
     accountId: 'acct-1', request: { model: 'gpt-test', input: 'hello' }, cookie: 'cpr_session=admin',
-    upstream: async () => ({ documents: [{ provider: 'openai', document: {
-      id: 'acct-1', authentication_kind, account_id, access_token: token,
-    } }] }),
+    upstream: async () => ({ documents: [{ provider: 'openai', document: { accounts: [{
+      id: 'acct-1', accountId: account_id, access_token: token, ...(authentication_kind === 'api_key' ? { api_key: 'fixture-key' } : {}),
+    }] } }] }),
     fetchImpl: async () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } }),
   }
 }
@@ -59,8 +59,7 @@ test('uses the matching OpenAI OAuth export and host account id first', async ()
     upstream: async path => {
       assert.equal(path, '/api/admin/accounts/export?accountIds=acct-1&confirm=export_sensitive_accounts')
       return { documents: [{ provider: 'openai', document: {
-        id: 'acct-1', authenticationKind: 'oauth', account_id: 'chatgpt-acct',
-        access_token: fixtureAccessToken,
+        accounts: [{ id: 'acct-1', accountId: 'chatgpt-acct', access_token: fixtureAccessToken }],
       } }] }
     },
     fetchImpl: async (url, init) => {
@@ -116,11 +115,11 @@ export function decodeJwtPayload(token) {
   return value
 }
 
-export function resolveAccountId(document, token) {
+export function resolveAccountId(account, token) {
   const claims = decodeJwtPayload(token)
   const authClaims = claims['https://api.openai.com/auth']
   const claimAccountId = authClaims && typeof authClaims === 'object' ? authClaims.chatgpt_account_id : undefined
-  const documentAccountId = document.account_id
+  const documentAccountId = account.accountId
   if (documentAccountId !== undefined && (typeof documentAccountId !== 'string' || !ACCOUNT_ID.test(documentAccountId)))
     throw new PublicError(400, '宿主账号 ID 无效')
   if (claimAccountId !== undefined && (typeof claimAccountId !== 'string' || !ACCOUNT_ID.test(claimAccountId)))
@@ -137,14 +136,16 @@ export async function requestBasispoints({ accountId, request, cookie, upstream,
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new PublicError(400, 'Responses 请求格式无效')
   const exported = await upstream(`/api/admin/accounts/export?accountIds=${encodeURIComponent(accountId)}&confirm=export_sensitive_accounts`, cookie)
   const documents = Array.isArray(exported?.documents) ? exported.documents : []
-  const matches = documents.filter(item => item?.provider === 'openai' && item?.document?.id === accountId)
+  const matches = documents.flatMap(item => item?.provider === 'openai' && Array.isArray(item.document?.accounts)
+    ? item.document.accounts.filter(account => account?.id === accountId)
+    : [])
   if (matches.length !== 1) throw new PublicError(400, '宿主账号不是唯一的 OpenAI OAuth 账号')
-  const document = matches[0].document
-  if (document.authentication_kind !== 'oauth' && document.authenticationKind !== 'oauth') throw new PublicError(400, '宿主账号不是 OpenAI OAuth 账号')
-  let accessToken = document.access_token
+  const account = matches[0]
+  if (account.api_key || typeof account.access_token !== 'string') throw new PublicError(400, '宿主账号不是 OpenAI OAuth 账号')
+  let accessToken = account.access_token
   if (typeof accessToken !== 'string' || !accessToken) throw new PublicError(400, '宿主账号没有可用 access token')
   try {
-    const chatgptAccountId = resolveAccountId(document, accessToken)
+    const chatgptAccountId = resolveAccountId(account, accessToken)
     const response = await fetchImpl(BASISPOINTS_URL, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
       headers: {
@@ -167,9 +168,9 @@ export async function requestBasispoints({ accountId, request, cookie, upstream,
 }
 ```
 
-Validate `accountId` with the same ASCII identifier rule used by the Rust bridge. The host path must be constructed with `encodeURIComponent(accountId)` and the fixed confirmation string. Select exactly one document whose `document.id` equals the requested ID, whose provider is `openai`, whose authentication kind is `oauth`, and whose `access_token` is a non-empty string. Do not return the export document.
+Validate `accountId` with the same ASCII identifier rule used by the Rust bridge. The host path must be constructed with `encodeURIComponent(accountId)` and the fixed confirmation string. Flatten `documents[].document.accounts[]` and select exactly one account whose `id` equals the requested ID, whose wrapper provider is `openai`, and whose `access_token` is a non-empty string without an `api_key`. Do not return the export document.
 
-Decode only the JWT payload; accept an account ID from `document.account_id` or from `claims['https://api.openai.com/auth'].chatgpt_account_id`. If both exist they must match. Reject malformed tokens, non-object payloads, missing IDs, and oversized response bodies with `PublicError` messages that contain no token data.
+Decode only the JWT payload; accept an account ID from `account.accountId` or from `claims['https://api.openai.com/auth'].chatgpt_account_id`. If both exist they must match. Reject malformed tokens, non-object payloads, missing IDs, and oversized response bodies with `PublicError` messages that contain no token data.
 
 - [ ] **Step 3: Implement the fixed Basis Points request and response cap.**
 
