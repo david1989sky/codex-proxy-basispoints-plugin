@@ -9,6 +9,11 @@ use gateway_plugin_sdk::{
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
+use crate::{
+    relay::{RelayError, ToolRelay},
+    tool_adapter, tool_response,
+};
+
 pub(crate) const BASISPOINTS_URL: &str = "https://bps.openai.com/basispoints/api/responses";
 pub(crate) const MAXIMUM_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
@@ -18,6 +23,7 @@ pub(crate) enum BasispointsError {
     UnsupportedResponse,
     Upstream,
     ResponseTooLarge,
+    Relay(RelayError),
 }
 
 impl fmt::Display for BasispointsError {
@@ -27,6 +33,7 @@ impl fmt::Display for BasispointsError {
             Self::UnsupportedResponse => "Basis Points 返回了不支持的内容类型",
             Self::Upstream => "Basis Points 请求失败",
             Self::ResponseTooLarge => "Basis Points 响应超过插件限制",
+            Self::Relay(error) => return fmt::Display::fmt(error, output),
         };
         output.write_str(message)
     }
@@ -56,7 +63,9 @@ pub(crate) async fn request(
             "宿主账号没有可用 access token",
         ))?;
     let account_id = resolve_account_id(credential, token)?;
-    let normalized = normalize_request(request)?;
+    let relay = ToolRelay::new();
+    let prepared = tool_adapter::prepare(&relay, request).map_err(BasispointsError::Relay)?;
+    let normalized = prepared.request;
     let body = serde_json::to_vec(&normalized)
         .map_err(|_| BasispointsError::InvalidRequest("请求编码失败"))?;
     let stream = normalized
@@ -133,7 +142,10 @@ pub(crate) async fn request(
                     ),
                     (
                         "user-agent".to_owned(),
-                        "codex-proxy-basispoints-plugin/0.1.4".to_owned(),
+                        format!(
+                            "codex-proxy-basispoints-plugin/{}",
+                            env!("CARGO_PKG_VERSION")
+                        ),
                     ),
                 ],
             },
@@ -163,6 +175,20 @@ pub(crate) async fn request(
         .collect(MAXIMUM_RESPONSE_BYTES)
         .await
         .map_err(map_body_error)?;
+    if (200..300).contains(&response.status)
+        && let Some(context) = prepared.context.as_ref()
+    {
+        let (content_type, body) = tool_response::transform(context, stream, content_type, &body)
+            .map_err(BasispointsError::Relay)?;
+        if body.len() > MAXIMUM_RESPONSE_BYTES {
+            return Err(BasispointsError::ResponseTooLarge);
+        }
+        return Ok(BasispointsResponse {
+            status: response.status,
+            content_type,
+            body,
+        });
+    }
     Ok(BasispointsResponse {
         status: response.status,
         content_type: if content_type.is_empty() {
@@ -174,7 +200,7 @@ pub(crate) async fn request(
     })
 }
 
-fn normalize_request(mut request: Value) -> Result<Value, BasispointsError> {
+pub(crate) fn normalize_request(mut request: Value) -> Result<Value, BasispointsError> {
     let object = request
         .as_object_mut()
         .ok_or(BasispointsError::InvalidRequest(

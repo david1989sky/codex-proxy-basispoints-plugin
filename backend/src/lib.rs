@@ -1,6 +1,10 @@
 mod app;
 mod basispoints;
 mod management;
+pub mod relay;
+pub mod sse;
+mod tool_adapter;
+mod tool_response;
 
 pub const PLUGIN_ID: &str = "david1989sky.codex-proxy-basispoints";
 

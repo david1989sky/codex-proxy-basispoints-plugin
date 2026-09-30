@@ -3,6 +3,10 @@ use gateway_plugin_sdk::client::{PluginSession, SessionConfig, SessionError};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--third-party-notices") {
+        print!("{}", include_str!("../../THIRD_PARTY_NOTICES.md"));
+        return Ok(());
+    }
     let session = PluginSession::accept(
         tokio::io::stdin(),
         tokio::io::stdout(),

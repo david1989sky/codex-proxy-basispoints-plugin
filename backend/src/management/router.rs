@@ -135,6 +135,7 @@ fn map_basispoints_error(error: BasispointsError) -> ApiError {
             ApiError::new(502, "upstream_response", "Basis Points 响应超过插件限制")
         }
         BasispointsError::Upstream => ApiError::new(502, "upstream", "Basis Points 请求失败"),
+        BasispointsError::Relay(error) => ApiError::new(error.status, error.code, error.message),
     }
 }
 
