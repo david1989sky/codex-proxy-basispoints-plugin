@@ -26,6 +26,14 @@ RS SDK 的 `host.http` 直接固定请求
 目标 URL 或代理设置。上游 JSON/SSE 状态码和正文会保留，正文上限为 2 MiB。access token 不会
 经过 loopback Worker，也不会写入插件配置或日志。
 
+## 能力边界
+
+当前版本支持字符串 `input`、标准 Responses message 数组（包括多轮 `user`/`assistant` 历史）、
+模型参数和 SSE 流式响应。当前管理路由不会执行工具中继或跨轮工具历史重放；请求中的
+`tools`、`tool_choice` 或 `parallel_tool_calls` 会原样交给 Basis Points，上游目前返回
+`422 Invalid request body`。完整工具中继需要迁移到独立的 middleware 架构，不能通过管理路由的
+小补丁实现。
+
 ## 本地验证
 
 环境需要 Rust 1.97 和 Node.js 22 或更高版本：
