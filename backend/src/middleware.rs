@@ -221,9 +221,11 @@ fn map_basispoints_error(error: BasispointsError) -> PluginFault {
         BasispointsError::ResponseTooLarge => {
             fault(ErrorCode::Capacity, "Basis Points 响应超过插件限制")
         }
-        BasispointsError::UnsupportedResponse
-        | BasispointsError::Upstream
-        | BasispointsError::Relay(_) => fault(ErrorCode::Upstream, "Basis Points 请求失败"),
+        BasispointsError::UnsupportedResponse => {
+            fault(ErrorCode::Upstream, "Basis Points 返回了不支持的内容类型")
+        }
+        BasispointsError::Upstream => fault(ErrorCode::Upstream, "Basis Points HTTP 请求失败"),
+        BasispointsError::Relay(_) => fault(ErrorCode::Upstream, "Basis Points 工具中继失败"),
     }
 }
 
