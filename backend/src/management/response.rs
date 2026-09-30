@@ -52,7 +52,7 @@ impl From<PluginFault> for ApiError {
         if error.code == ErrorCode::Conflict {
             Self::new(409, "conflict", "迁移状态已更新，请重新加载后再试")
         } else {
-            Self::new(502, "host_callback", "宿主状态操作未完成")
+            Self::new(502, "host_callback", "宿主回调未完成")
         }
     }
 }
@@ -65,14 +65,6 @@ impl From<serde_json::Error> for ApiError {
 
 pub(super) fn json_reply(body: &impl Serialize) -> ApiResult {
     encode(200, body).map_err(|_| ApiError::new(500, "encoding", "管理接口响应编码失败"))
-}
-
-pub(super) fn raw_json(
-    status: u16,
-    body: Vec<u8>,
-) -> Result<TypedReply<ManagementResponse>, PluginFault> {
-    raw_response(status, JSON_CONTENT_TYPE, body)
-        .map_err(|_| PluginFault::new(ErrorCode::Fault, "管理接口响应编码失败"))
 }
 
 pub(super) fn raw_response(

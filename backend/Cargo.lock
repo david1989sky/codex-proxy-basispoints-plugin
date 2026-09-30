@@ -72,8 +72,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-proxy-twofa-plugin"
-version = "0.1.2"
+name = "codex-proxy-basispoints-plugin"
+version = "0.1.0"
 dependencies = [
  "gateway-plugin-sdk",
  "reqwest",

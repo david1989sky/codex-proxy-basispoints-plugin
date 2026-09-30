@@ -14,24 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12.6.0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: x86_64-unknown-linux-gnu
           components: rustfmt, clippy
-      - run: pnpm --dir frontend install --frozen-lockfile
-      - run: pnpm --dir frontend run typecheck
-      - run: pnpm --dir frontend run lint
-      - run: pnpm --dir frontend run build
       - run: npm --prefix worker ci --ignore-scripts --no-audit --no-fund
-      - run: npx --prefix worker playwright install --with-deps chromium
       - run: npm --prefix worker test
       - run: cargo +1.97.0 fmt --manifest-path backend/Cargo.toml -- --check
       - run: cargo +1.97.0 clippy --manifest-path backend/Cargo.toml --all-targets --all-features --locked -- -D warnings
@@ -42,14 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12.6.0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: x86_64-unknown-linux-gnu
@@ -64,10 +49,9 @@ jobs:
         with:
           context: worker
           push: true
-          tags: ghcr.io/david1989sky/codex-proxy-twofa-worker:${{ github.ref_name }}
+          tags: ghcr.io/david1989sky/codex-proxy-basispoints-worker:${{ github.ref_name }}
       - run: cargo +1.97.0 install --locked --git https://github.com/zyycn/codex-proxy-rs.git --rev 70d1557b55aed871d66dee5db82c2254990d06a6 codex-proxy-plugin-cli --root .tools
-      - run: pnpm --dir frontend install --frozen-lockfile
-      - run: WORKER_IMAGE=ghcr.io/david1989sky/codex-proxy-twofa-worker:${{ github.ref_name }} WORKER_IMAGE_DIGEST=${{ steps.worker.outputs.digest }} PLUGIN_CLI=$PWD/.tools/bin/cpr-plugin bash scripts/package.sh
+      - run: WORKER_IMAGE=ghcr.io/david1989sky/codex-proxy-basispoints-worker:${{ github.ref_name }} WORKER_IMAGE_DIGEST=${{ steps.worker.outputs.digest }} PLUGIN_CLI=$PWD/.tools/bin/cpr-plugin bash scripts/package.sh
       - run: |
           test "$(jq -r .workerImageDigest dist/companion-manifest.json)" = "${{ steps.worker.outputs.digest }}"
           test "$(jq -r .pluginVersion dist/companion-manifest.json)" = "${GITHUB_REF_NAME#v}"

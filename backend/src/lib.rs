@@ -1,9 +1,8 @@
 mod app;
-mod host_calls;
 mod management;
 mod worker_client;
 
-pub const PLUGIN_ID: &str = "david1989sky.codex-proxy-twofa";
+pub const PLUGIN_ID: &str = "david1989sky.codex-proxy-basispoints";
 
 pub fn author_manifest() -> Result<gateway_plugin_sdk::Manifest, gateway_plugin_sdk::ManifestError>
 {

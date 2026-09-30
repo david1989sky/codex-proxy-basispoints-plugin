@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use codex_proxy_twofa_plugin::{PLUGIN_ID, PluginState, WorkerClient, author_manifest, plugin};
+use codex_proxy_basispoints_plugin::{
+    PLUGIN_ID, PluginState, WorkerClient, author_manifest, plugin,
+};
 use gateway_plugin_sdk::client::{PluginSession, SessionConfig, SessionError};
 
 #[tokio::main(flavor = "current_thread")]

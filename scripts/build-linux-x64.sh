@@ -5,14 +5,9 @@ ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 TARGET="${1:-x86_64-unknown-linux-gnu}"
 [[ "$TARGET" == "x86_64-unknown-linux-gnu" ]] || { printf '%s\n' 'Only x86_64-unknown-linux-gnu is supported by this release.' >&2; exit 1; }
 
-pnpm --dir "$ROOT/frontend" install --frozen-lockfile
-pnpm --dir "$ROOT/frontend" run typecheck
-pnpm --dir "$ROOT/frontend" run lint
-pnpm --dir "$ROOT/frontend" run build
-
 if [[ "${BUILD_CONTAINER:-0}" == "1" ]] || [[ "$(rustc -vV | awk '/^host: / {print $2}')" != "$TARGET" ]]; then
   command -v docker >/dev/null 2>&1 || { printf '%s\n' 'Docker is required for a non-host Rust target.' >&2; exit 1; }
-  BUILD_ROOT="$(mktemp -d /tmp/cpr-twofa-build.XXXXXX)"
+  BUILD_ROOT="$(mktemp -d /tmp/cpr-basispoints-build.XXXXXX)"
   trap 'rm -rf "$BUILD_ROOT"' EXIT
   mkdir -p "$BUILD_ROOT/backend"
   cp -R "$ROOT/backend/src" "$BUILD_ROOT/backend/"
@@ -27,7 +22,7 @@ if [[ "${BUILD_CONTAINER:-0}" == "1" ]] || [[ "$(rustc -vV | awk '/^host: / {pri
     exit 1
   fi
   mkdir -p "$ROOT/backend/target/$TARGET/release"
-  docker cp "$CONTAINER:/tmp/backend/target/$TARGET/release/codex-proxy-twofa-plugin" "$ROOT/backend/target/$TARGET/release/codex-proxy-twofa-plugin"
+  docker cp "$CONTAINER:/tmp/backend/target/$TARGET/release/codex-proxy-basispoints-plugin" "$ROOT/backend/target/$TARGET/release/codex-proxy-basispoints-plugin"
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 else
   cargo +1.97.0 build --release --locked --target "$TARGET" --manifest-path "$ROOT/backend/Cargo.toml"

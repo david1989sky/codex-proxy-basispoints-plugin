@@ -1,7 +1,6 @@
 use super::response::ApiError;
 use gateway_plugin_sdk::{call::management::ManagementRequest, client::TypedCall};
 use serde::de::DeserializeOwned;
-use serde_json::{Map, Value};
 
 pub(super) const MAXIMUM_BODY_BYTES: usize = 140 * 1024;
 
@@ -32,12 +31,4 @@ pub(super) fn bounded_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-}
-
-pub(super) fn require_empty_object(value: &Value) -> Result<(), ApiError> {
-    if value.as_object().is_some_and(Map::is_empty) {
-        Ok(())
-    } else {
-        Err(ApiError::invalid("请求正文必须是空对象"))
-    }
 }

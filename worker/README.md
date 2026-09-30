@@ -1,50 +1,18 @@
-# 2FA 授权登录 Worker
+# Basis Points Worker
 
-官方 Codex Proxy RS 镜像和账号结构保持不变，Worker 按官方内部账号 ID 关联保存登录信息。
+这个 Worker 只负责 Basis Points Responses 请求转发，不启动浏览器、不保存账号凭据，也不提供账号管理页面。
 
-## 使用
+## 环境变量
 
-- 批量 2FA 授权成功后，邮箱、密码、TOTP 密钥通过 AES-256-GCM 加密保存
-- 账号出现 401 时，在「更多操作 → 重新授权 → 2FA 登录」执行「使用已保存 2FA 登录」
-- 每次执行创建新的官方 OAuth 流程，绑定原账号 ID；完成时不提交账号设置，保留分组、权重、并发和代理
-- OAuth 授权页使用 Worker 所在环境的网络；账号出站代理仅用于服务端 OAuth 交换及业务请求
-- 历史账号可补录单行 `邮箱----密码----2FA密钥`，邮箱须与原账号一致，授权成功后保存
-- 保存状态旁可更新信息或确认清除，清除不删除官方账号或令牌
-- 不自动重试 401，不绕过人工验证；人工验证沿用任务内手动操作入口
-- 官方导入成功但本地保存失败时，显示授权成功及补录提示，不重复导入
-
-## 持久化与部署
-
-数据目录 `/opt/cpr-twofa/data/credentials` 独立于发布目录，以读写方式挂载。
-密钥 `/opt/cpr-twofa/secrets/twofa-key` 是单独只读挂载的 32 字节随机文件。
-目录权限为 0700，记录为 0600，密钥为 0400，仅容器运行用户和主机管理员可读。
-密钥或校验数据不匹配时拒绝启动，不能删除密钥以尝试修复。
-
-已有部署的增量更新只需构建 Worker、运行 `ops/provision-vault.sh` 并重建 Worker 容器，然后发布前端产物。
-`provision-vault.sh` 仅在空数据目录且没有密钥时首次生成密钥；不会覆盖已有密钥。
-回滚只还原 Worker 和前端，不运行旧版 `rollback.sh`，避免回退官方服务版本。
-备份须保留加密数据及对应密钥，并分开保管、限制权限；仅备份加密文件无法恢复登录信息。
-不要将密钥、解密数据、真实凭据或包含凭据的请求转储放入源码、日志或截图。
-
-删除官方账号前可清除已保存信息。若从其他工具删除账号，Worker 下次访问该账号遇到官方 404 会清理对应记录。
-重新授权时重新读取官方账号及代理。官方只暴露脱敏代理端点，不能唯一匹配已保存代理或缺少认证映射时，拒绝猜测并提示使用授权链接。
-只保存导入成功的记录，不保存失败账号；旧版本没有保存的信息无法自动恢复。
+- `PUBLIC_ORIGIN`：RS 公共来源，用于同源校验。
+- `CPR_BASE_URL`：Codex Proxy RS 地址，默认 `http://127.0.0.1:28080`。
+- `PORT`：监听端口，默认 `28082`。
 
 ## 接口
 
-以下接口沿用管理员会话、同源检查和 `X-CPR-TwoFA: 1`，不返回密码或 TOTP 密钥。
+- `GET /health`：返回 Worker 就绪状态。
+- `POST /api/basispoints/responses`：需要 RS 管理会话、来源校验和 `X-CPR-Basispoints: 1`，请求体为 `{accountId, request}`。
 
-| 接口 | 用途 |
-| --- | --- |
-| `GET /api/admin/twofa/accounts/:accountId` | 返回 `saved` 与 `updatedAt` |
-| `POST /api/admin/twofa/accounts/:accountId/reauthorize` | `submissionId` 必填，`text` 可选；省略时使用已保存信息 |
-| `DELETE /api/admin/twofa/accounts/:accountId` | 清除已保存信息，目标正在重新授权时拒绝 |
-
-新导入与重新授权均返回现有任务类型，成功项增加 `credentialsSaved`。
-任务受管理员会话隔离，同一账号不能同时运行多个重新授权任务。
-
-## 验证
-
-Worker 执行 `npm test`；前端执行 `npm run lint` 与 `npm run build`。
-构建前端后，在 Worker 目录执行 `node --test test/ui.e2e.mjs` 检查桌面及窄屏。
-测试全部使用虚构凭据，模拟 OAuth 通过不等同于真实 OpenAI 账号可用。
+Worker 通过 RS 的账号导出接口读取 OAuth `accessToken`，然后只请求固定的
+`https://bps.openai.com/basispoints/api/responses`。支持的上游类型为
+`application/json` 和 `text/event-stream`，响应正文限制为 2 MiB。
