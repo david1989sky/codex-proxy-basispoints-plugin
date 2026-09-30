@@ -86,9 +86,14 @@ pub(super) fn raw_response(
             "Worker 返回了不支持的内容类型",
         ));
     }
+    let normalized_content_type = if media_type.eq_ignore_ascii_case("application/json") {
+        JSON_CONTENT_TYPE
+    } else {
+        "text/event-stream"
+    };
     Ok(TypedReply::new(ManagementResponse {
         status,
-        content_type: content_type.to_owned(),
+        content_type: normalized_content_type.to_owned(),
         headers: vec![
             gateway_plugin_sdk::call::middleware::MiddlewareHeader {
                 name: "Cache-Control".to_owned(),
@@ -141,13 +146,20 @@ mod tests {
             Err(_) => panic!("SSE response should be accepted"),
         };
 
-        assert_eq!(
-            reply.result.content_type,
-            "Text/Event-Stream; charset=utf-8"
-        );
+        assert_eq!(reply.result.content_type, "text/event-stream");
         assert_eq!(reply.result.status, 200);
         assert_eq!(reply.payload, b"data: hello\n\n");
         assert_eq!(reply.result.headers.len(), 2);
+    }
+
+    #[test]
+    fn normalizes_allowed_content_type_for_host_route_contract() {
+        let reply = match raw_response(400, "application/json; charset=utf-8", br#"{}"#.to_vec()) {
+            Ok(reply) => reply,
+            Err(_) => panic!("JSON response should be accepted"),
+        };
+
+        assert_eq!(reply.result.content_type, "application/json");
     }
 
     #[test]

@@ -9,7 +9,7 @@ fn author_manifest_declares_basispoints_management_contract() {
         manifest.plugin_id().expect("derived plugin id"),
         "david1989sky.codex-proxy-basispoints"
     );
-    assert_eq!(manifest.version.to_string(), "0.1.0");
+    assert_eq!(manifest.version.to_string(), "0.1.1");
     assert_eq!(
         manifest.engines.codex_proxy_rs.to_string(),
         ">=3.18.1, <4.0.0"
