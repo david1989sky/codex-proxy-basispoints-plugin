@@ -83,7 +83,8 @@ impl WorkerClient {
         let mut builder = self
             .client
             .request(method, url)
-            .header("X-CPR-Basispoints", "1");
+            .header("X-CPR-Basispoints", "1")
+            .header("X-CPR-Basispoints-Internal", "1");
         for header in &request.headers {
             if (header.name.eq_ignore_ascii_case("cookie")
                 || header.name.eq_ignore_ascii_case("origin"))

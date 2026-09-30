@@ -27,27 +27,37 @@ export async function createApp({ origin, upstream, basispointsFetch = fetch }) 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff')
     if (request.url === '/health') return
+    const internal = request.headers['x-cpr-basispoints-internal'] === '1'
     if (request.headers['x-cpr-basispoints'] !== '1' || (request.headers.origin && request.headers.origin !== origin)
-      || (!['GET', 'HEAD'].includes(request.method) && request.headers.origin !== origin)) {
+      || (!internal && !['GET', 'HEAD'].includes(request.method) && request.headers.origin !== origin)) {
       throw new PublicError(403, '来源验证失败')
     }
     const session = request.headers.cookie?.split(';').map(value => value.trim()).find(value => /^cpr_session=[^;\s]+$/.test(value))
-    if (!session) throw new PublicError(401, '请先登录管理员账号')
-    const auth = await upstream('/api/auth/status', session)
-    if (!auth.authenticated) throw new PublicError(401, '管理员会话已过期')
-    if (auth.session?.role !== 'admin') throw new PublicError(403, '此操作需要管理员权限')
-    request.sessionCookie = session
-    request.owner = createHash('sha256').update(session).digest('hex')
+    if (!internal) {
+      if (!session) throw new PublicError(401, '请先登录管理员账号')
+      const auth = await upstream('/api/auth/status', session)
+      if (!auth.authenticated) throw new PublicError(401, '管理员会话已过期')
+      if (auth.session?.role !== 'admin') throw new PublicError(403, '此操作需要管理员权限')
+      request.sessionCookie = session
+      request.owner = createHash('sha256').update(session).digest('hex')
+    }
   })
   const ok = data => ({ code: 200, message: 'ok', data })
   app.get('/health', () => ok({ ready: true }))
   app.post('/api/basispoints/responses', { schema: { body: {
     type: 'object', additionalProperties: false, required: ['accountId', 'request'],
-    properties: { accountId: { type: 'string', minLength: 1, maxLength: 128 }, request: { type: 'object', additionalProperties: true } },
+    properties: {
+      accountId: { type: 'string', minLength: 1, maxLength: 128 },
+      request: { type: 'object', additionalProperties: true },
+      accessToken: { type: 'string', minLength: 1, maxLength: 16384 },
+      chatgptAccountId: { type: 'string', minLength: 1, maxLength: 128 },
+    },
   } } }, async (request, reply) => {
     const result = await requestBasispoints({
       accountId: request.body.accountId,
       request: request.body.request,
+      chatgptAccountId: request.body.chatgptAccountId,
+      accessToken: request.body.accessToken,
       cookie: request.sessionCookie,
       upstream,
       fetchImpl: basispointsFetch,

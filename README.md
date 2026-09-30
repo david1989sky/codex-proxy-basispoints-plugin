@@ -17,8 +17,9 @@
 }
 ```
 
-Worker 从宿主账号导出接口读取指定的 OpenAI OAuth 账号，解析 `accessToken` 和
-JWT 的 `claims["https://api.openai.com/auth"].chatgpt_account_id`，再固定请求
+插件通过 RS 的 `host.auth.get` 宿主回调读取请求的 OpenAI OAuth 账号，解析
+`access_token` 和 JWT 的 `claims["https://api.openai.com/auth"].chatgpt_account_id`，再将
+凭据仅通过本机内部通道交给 Worker，固定请求
 [`https://bps.openai.com/basispoints/api/responses`](https://bps.openai.com/basispoints/api/responses)。
 Worker 会为普通 Responses 请求补齐 Basis Points 所需的 `model_selection`、`stream`、`store`、
 `reasoning_effort` 和会话 `metadata` 字段，并发送 Excel 客户端请求头。调用方不能提交 token、
@@ -56,4 +57,5 @@ PLUGIN_CLI="$PWD/.tools/bin/cpr-plugin" bash scripts/package.sh
 `http://127.0.0.1:28082`，可用 [`ops/companion-install.sh`](ops/companion-install.sh)
 和 [`ops/companion-update.sh`](ops/companion-update.sh) 部署固定摘要的镜像。
 
-插件只接受本机 Worker 地址，并通过 RS 管理会话转发请求。Worker 为无状态服务，不挂载凭据目录或密钥文件。
+插件只接受本机 Worker 地址。管理入口由 RS 管理员会话保护，账号凭据由宿主回调授权；Worker 不读取浏览器 Cookie，
+不挂载凭据目录或密钥文件。

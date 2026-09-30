@@ -85,21 +85,25 @@ async function readBoundedBody(response) {
   }
 }
 
-export async function requestBasispoints({ accountId, request, cookie, upstream, fetchImpl = fetch }) {
+export async function requestBasispoints({ accountId, request, chatgptAccountId, cookie, accessToken: suppliedAccessToken, upstream, fetchImpl = fetch }) {
   if (typeof accountId !== 'string' || !HOST_ACCOUNT_ID.test(accountId)) throw new PublicError(400, '宿主账号 ID 无效')
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new PublicError(400, 'Responses 请求格式无效')
-  const exported = await upstream(`/api/admin/accounts/export?accountIds=${encodeURIComponent(accountId)}&confirm=export_sensitive_accounts`, cookie)
-  const documents = Array.isArray(exported?.documents) ? exported.documents : []
-  const matches = documents.flatMap(item => item?.provider === 'openai' && Array.isArray(item.document?.accounts)
-    ? item.document.accounts.filter(account => account?.id === accountId)
-    : [])
-  if (matches.length !== 1) throw new PublicError(400, '宿主账号不是唯一的 OpenAI OAuth 账号')
-  const account = matches[0]
-  if (account.apiKey || account.api_key || typeof account.accessToken !== 'string') throw new PublicError(400, '宿主账号不是 OpenAI OAuth 账号')
-  let accessToken = account.accessToken
+  let accessToken = suppliedAccessToken
+  let accountDocument = chatgptAccountId ? { accountId: chatgptAccountId } : {}
+  if (accessToken === undefined) {
+    const exported = await upstream(`/api/admin/accounts/export?accountIds=${encodeURIComponent(accountId)}&confirm=export_sensitive_accounts`, cookie)
+    const documents = Array.isArray(exported?.documents) ? exported.documents : []
+    const matches = documents.flatMap(item => item?.provider === 'openai' && Array.isArray(item.document?.accounts)
+      ? item.document.accounts.filter(account => account?.id === accountId)
+      : [])
+    if (matches.length !== 1) throw new PublicError(400, '宿主账号不是唯一的 OpenAI OAuth 账号')
+    accountDocument = matches[0]
+    if (accountDocument.apiKey || accountDocument.api_key || typeof accountDocument.accessToken !== 'string') throw new PublicError(400, '宿主账号不是 OpenAI OAuth 账号')
+    accessToken = accountDocument.accessToken
+  }
   if (typeof accessToken !== 'string' || !accessToken) throw new PublicError(400, '宿主账号没有可用 access token')
   try {
-    const chatgptAccountId = resolveAccountId(account, accessToken)
+    const chatgptAccountId = resolveAccountId(accountDocument, accessToken)
     let response
     try {
       response = await fetchImpl(BASISPOINTS_URL, {

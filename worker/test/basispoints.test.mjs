@@ -57,6 +57,24 @@ test('uses the matching OpenAI OAuth export and host account id first', async ()
   assert.equal(result.body.toString(), '{"ok":true}')
 })
 
+test('uses a host-resolved access token without an HTTP admin session', async () => {
+  const token = fixtureJwt({ 'https://api.openai.com/auth': { chatgpt_account_id: 'claim-acct' } })
+  let exported = false
+  const result = await requestBasispoints({
+    accountId: 'acct-1',
+    request: { model: 'gpt-test', input: 'hello' },
+    chatgptAccountId: 'claim-acct',
+    accessToken: token,
+    upstream: async () => { exported = true; throw new Error('export must not be called') },
+    fetchImpl: async (_url, init) => {
+      assert.equal(init.headers['chatgpt-account-id'], 'claim-acct')
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+    },
+  })
+  assert.equal(result.status, 200)
+  assert.equal(exported, false)
+})
+
 test('falls back to the JWT ChatGPT account claim when export metadata is absent', async () => {
   const token = fixtureJwt({ 'https://api.openai.com/auth': { chatgpt_account_id: 'claim-acct' } })
   const options = fixtureOptions({ accessToken: token })
