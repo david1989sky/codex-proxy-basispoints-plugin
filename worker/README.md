@@ -15,4 +15,5 @@
 
 Worker 通过 RS 的账号导出接口读取 OAuth `accessToken`，然后只请求固定的
 `https://bps.openai.com/basispoints/api/responses`。支持的上游类型为
-`application/json` 和 `text/event-stream`，响应正文限制为 2 MiB。
+`application/json` 和 `text/event-stream`，响应正文限制为 2 MiB。转发前会补齐 BPS 所需的
+请求字段和 Excel 客户端请求头，同时保留输入历史、工具目录及上下文字段。

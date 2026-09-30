@@ -20,7 +20,9 @@
 Worker 从宿主账号导出接口读取指定的 OpenAI OAuth 账号，解析 `accessToken` 和
 JWT 的 `claims["https://api.openai.com/auth"].chatgpt_account_id`，再固定请求
 [`https://bps.openai.com/basispoints/api/responses`](https://bps.openai.com/basispoints/api/responses)。
-调用方不能提交 token、目标 URL 或代理设置。上游 JSON/SSE 状态码和正文会保留，正文上限为 2 MiB。
+Worker 会为普通 Responses 请求补齐 Basis Points 所需的 `model_selection`、`stream`、`store`、
+`reasoning_effort` 和会话 `metadata` 字段，并发送 Excel 客户端请求头。调用方不能提交 token、
+目标 URL 或代理设置。上游 JSON/SSE 状态码和正文会保留，正文上限为 2 MiB。
 
 ## 本地验证
 

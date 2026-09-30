@@ -1,4 +1,5 @@
 import { PublicError } from './core.mjs'
+import { randomUUID } from 'node:crypto'
 
 export const BASISPOINTS_URL = 'https://bps.openai.com/basispoints/api/responses'
 export const MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -6,6 +7,28 @@ export const MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
 const HOST_ACCOUNT_ID = /^[A-Za-z0-9_.-]{1,128}$/
 const CHATGPT_ACCOUNT_ID = /^[A-Za-z0-9_.-]{1,128}$/
 const ALLOWED_MEDIA_TYPES = new Set(['application/json', 'text/event-stream'])
+
+function normalizeEffort(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['x-high', 'extra-high', 'extra_high', 'max'].includes(normalized)) return 'xhigh'
+  return ['low', 'medium', 'high', 'xhigh', 'ultra'].includes(normalized) ? normalized : 'medium'
+}
+
+function normalizeRequest(request) {
+  const normalized = { ...request }
+  normalized.model_selection = 'explicit'
+  normalized.stream = request.stream === true
+  normalized.store = false
+  normalized.reasoning_effort = normalizeEffort(request.reasoning_effort ?? request.reasoning?.effort)
+  const metadata = request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
+    ? { ...request.metadata }
+    : {}
+  metadata.task_id = typeof metadata.task_id === 'string' && metadata.task_id ? metadata.task_id : randomUUID()
+  metadata.turn_id = typeof metadata.turn_id === 'string' && metadata.turn_id ? metadata.turn_id : randomUUID()
+  metadata.agent_iteration = metadata.agent_iteration === undefined ? '0' : String(metadata.agent_iteration)
+  normalized.metadata = metadata
+  return normalized
+}
 
 export function decodeJwtPayload(token) {
   if (typeof token !== 'string' || token.length > 16384) throw new PublicError(400, 'access token JWT 格式无效')
@@ -87,8 +110,27 @@ export async function requestBasispoints({ accountId, request, cookie, upstream,
           'x-openai-account-id': chatgptAccountId,
           'x-basispoints-auth-mode': 'chatgpt',
           'content-type': 'application/json',
+          accept: request.stream === true ? 'text/event-stream' : 'application/json',
+          'accept-encoding': 'identity',
+          origin: 'https://bps.openai.com',
+          'x-openai-internal-basispoints-client-agent-profile': 'excel',
+          'x-openai-internal-basispoints-client-editor': 'excel',
+          'x-openai-internal-basispoints-client-host': 'office',
+          'x-openai-internal-basispoints-client-platform': 'excel',
+          'x-openai-internal-basispoints-client-platform-class': 'PC',
+          'x-openai-internal-basispoints-client-product': 'basispoints-excel-plugin',
+          'x-openai-internal-basispoints-client-runtime': 'desktop',
+          'x-openai-internal-basispoints-office-host': 'Excel',
+          'x-openai-internal-basispoints-office-platform': 'PC',
+          'x-stainless-arch': 'unknown',
+          'x-stainless-lang': 'js',
+          'x-stainless-os': 'Unknown',
+          'x-stainless-package-version': '6.31.0',
+          'x-stainless-retry-count': '0',
+          'x-stainless-runtime': 'browser:chrome',
+          'user-agent': 'cpr-basispoints-worker/0.1.2',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(normalizeRequest(request)),
       })
     } catch (error) {
       if (error instanceof PublicError) throw error

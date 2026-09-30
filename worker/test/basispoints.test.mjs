@@ -39,7 +39,16 @@ test('uses the matching OpenAI OAuth export and host account id first', async ()
       assert.equal(init.headers['chatgpt-account-id'], 'chatgpt-acct')
       assert.equal(init.headers['x-openai-account-id'], 'chatgpt-acct')
       assert.equal(init.headers['x-basispoints-auth-mode'], 'chatgpt')
-      assert.deepEqual(JSON.parse(init.body), { model: 'gpt-test', input: 'hello' })
+      assert.equal(init.headers.origin, 'https://bps.openai.com')
+      assert.equal(init.headers['x-openai-internal-basispoints-client-product'], 'basispoints-excel-plugin')
+      const body = JSON.parse(init.body)
+      assert.deepEqual(body, {
+        model: 'gpt-test', input: 'hello', model_selection: 'explicit', stream: false, store: false,
+        reasoning_effort: 'medium', metadata: body.metadata,
+      })
+      assert.match(body.metadata.task_id, /^[0-9a-f-]{36}$/)
+      assert.match(body.metadata.turn_id, /^[0-9a-f-]{36}$/)
+      assert.equal(body.metadata.agent_iteration, '0')
       return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
     },
   })
@@ -58,6 +67,30 @@ test('falls back to the JWT ChatGPT account claim when export metadata is absent
   }
   const result = await requestBasispoints(options)
   assert.equal(result.status, 200)
+})
+
+test('preserves request context while normalizing BPS contract fields', async () => {
+  const options = fixtureOptions()
+  options.request = {
+    model: 'gpt-test', stream: true, reasoning: { effort: 'x-high' },
+    metadata: { task_id: 'task-1', turn_id: 'turn-1', agent_iteration: 2, custom: 'keep' },
+    input: [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first' }] },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'second' }] },
+    ],
+  }
+  options.fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body)
+    assert.equal(body.stream, true)
+    assert.equal(body.store, false)
+    assert.equal(body.model_selection, 'explicit')
+    assert.equal(body.reasoning_effort, 'xhigh')
+    assert.deepEqual(body.metadata, { task_id: 'task-1', turn_id: 'turn-1', agent_iteration: '2', custom: 'keep' })
+    assert.equal(body.input.length, 2)
+    return new Response('data: ok\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  const result = await requestBasispoints(options)
+  assert.equal(result.contentType, 'text/event-stream')
 })
 
 test('rejects API keys, malformed JWTs, missing account ids, and claim mismatches', async () => {
