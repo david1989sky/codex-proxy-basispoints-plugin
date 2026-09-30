@@ -6,7 +6,7 @@ use gateway_plugin_sdk::{
     call::host::{AuthCredential, HttpRequest},
     client::HostClient,
 };
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 pub(crate) const BASISPOINTS_URL: &str = "https://bps.openai.com/basispoints/api/responses";
@@ -184,6 +184,7 @@ fn normalize_request(mut request: Value) -> Result<Value, BasispointsError> {
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    normalize_input(object)?;
     object.insert(
         "model_selection".to_owned(),
         Value::String("explicit".to_owned()),
@@ -230,6 +231,65 @@ fn normalize_request(mut request: Value) -> Result<Value, BasispointsError> {
         );
     }
     Ok(request)
+}
+
+fn normalize_input(object: &mut Map<String, Value>) -> Result<(), BasispointsError> {
+    let Some(input) = object.get_mut("input") else {
+        return Ok(());
+    };
+    match input {
+        Value::String(text) => {
+            *input = json!([message_item("user", text)]);
+        }
+        Value::Array(items) => {
+            for item in items {
+                let Some(item_object) = item.as_object_mut() else {
+                    continue;
+                };
+                let Some(role) = item_object
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                else {
+                    continue;
+                };
+                item_object
+                    .entry("type".to_owned())
+                    .or_insert_with(|| Value::String("message".to_owned()));
+                if let Some(Value::String(text)) = item_object.get("content") {
+                    let content_type = if role.eq_ignore_ascii_case("assistant") {
+                        "output_text"
+                    } else {
+                        "input_text"
+                    };
+                    item_object.insert(
+                        "content".to_owned(),
+                        json!([{"type": content_type, "text": text}]),
+                    );
+                }
+            }
+        }
+        Value::Null => {}
+        _ => {
+            return Err(BasispointsError::InvalidRequest(
+                "Responses input 必须是字符串或数组",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn message_item(role: &str, text: &str) -> Value {
+    let content_type = if role.eq_ignore_ascii_case("assistant") {
+        "output_text"
+    } else {
+        "input_text"
+    };
+    json!({
+        "type": "message",
+        "role": role,
+        "content": [{"type": content_type, "text": text}],
+    })
 }
 
 fn normalize_effort(value: &str) -> String {
@@ -296,5 +356,47 @@ fn map_body_error(error: PluginFault) -> BasispointsError {
         BasispointsError::ResponseTooLarge
     } else {
         BasispointsError::Upstream
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_request;
+    use serde_json::json;
+
+    #[test]
+    fn normalizes_string_input_to_basispoints_message_item() {
+        let normalized = normalize_request(json!({
+            "model": "gpt-6-astra",
+            "input": "Reply with exactly: BPS_OK"
+        }))
+        .expect("request should normalize");
+
+        assert_eq!(
+            normalized["input"],
+            json!([{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Reply with exactly: BPS_OK"}]
+            }])
+        );
+    }
+
+    #[test]
+    fn normalizes_role_content_history_without_dropping_turns() {
+        let normalized = normalize_request(json!({
+            "model": "gpt-6-astra",
+            "input": [
+                {"role": "user", "content": "First"},
+                {"role": "assistant", "content": "Second"},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Third"}]}
+            ]
+        }))
+        .expect("history should normalize");
+
+        assert_eq!(normalized["input"][0]["type"], "message");
+        assert_eq!(normalized["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(normalized["input"][1]["content"][0]["type"], "output_text");
+        assert_eq!(normalized["input"].as_array().map(Vec::len), Some(3));
     }
 }
