@@ -83,6 +83,7 @@ pub(crate) async fn request(
                     ("x-openai-account-id".to_owned(), account_id),
                     ("x-basispoints-auth-mode".to_owned(), "chatgpt".to_owned()),
                     ("content-type".to_owned(), "application/json".to_owned()),
+                    ("accept-encoding".to_owned(), "identity".to_owned()),
                     (
                         "accept".to_owned(),
                         if stream {
@@ -129,7 +130,9 @@ pub(crate) async fn request(
                         "PC".to_owned(),
                     ),
                     ("x-stainless-arch".to_owned(), "unknown".to_owned()),
-                    ("x-stainless-lang".to_owned(), "rust".to_owned()),
+                    // Basis Points' Excel transport uses the browser JavaScript
+                    // Stainless profile even when the host plugin is written in Rust.
+                    ("x-stainless-lang".to_owned(), "js".to_owned()),
                     ("x-stainless-os".to_owned(), "Unknown".to_owned()),
                     (
                         "x-stainless-package-version".to_owned(),
@@ -142,10 +145,7 @@ pub(crate) async fn request(
                     ),
                     (
                         "user-agent".to_owned(),
-                        format!(
-                            "codex-proxy-basispoints-plugin/{}",
-                            env!("CARGO_PKG_VERSION")
-                        ),
+                        format!("cpr-oai-basispoints/{}", env!("CARGO_PKG_VERSION")),
                     ),
                 ],
             },
