@@ -28,20 +28,6 @@ impl ApiError {
         Self::new(400, "invalid_request", message)
     }
 
-    pub fn from_worker(status: u16, message: impl Into<String>) -> Self {
-        let code = match status {
-            401 => "unauthorized",
-            403 => "forbidden",
-            404 => "not_found",
-            409 => "conflict",
-            413 => "payload_too_large",
-            429 => "busy",
-            503 => "worker_unavailable",
-            _ => "worker_error",
-        };
-        Self::new(status, code, message)
-    }
-
     pub fn into_reply(self) -> Result<TypedReply<ManagementResponse>, PluginFault> {
         encode(self.status, &json!({ "error": self }))
     }

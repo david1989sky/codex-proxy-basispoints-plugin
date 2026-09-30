@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use gateway_plugin_sdk::{
     PluginFault,
     call::host::{AuthCredential, AuthGetRequest},
@@ -9,18 +7,15 @@ use gateway_plugin_sdk::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::worker_client::{WorkerClient, WorkerError};
+use crate::basispoints::{self, BasispointsError};
 
 use super::{
     response::{ApiError, ApiResult, json_reply, raw_response},
     validation::{MAXIMUM_BODY_BYTES, bounded_id, decode_json, require_no_query},
 };
 
-#[derive(Clone)]
-pub struct PluginState {
-    pub(crate) worker: Arc<WorkerClient>,
-    pub(crate) worker_image_digest: String,
-}
+#[derive(Clone, Default)]
+pub struct PluginState;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -30,11 +25,8 @@ struct BasispointsRequest {
 }
 
 impl PluginState {
-    pub fn new(worker: Arc<WorkerClient>, worker_image_digest: String) -> Self {
-        Self {
-            worker,
-            worker_image_digest,
-        }
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -57,20 +49,15 @@ async fn route(state: PluginState, call: TypedCall<ManagementRequest>) -> ApiRes
     }
 }
 
-async fn status(state: PluginState) -> ApiResult {
-    let health = state
-        .worker
-        .health()
-        .await
-        .map_err(|error| ApiError::from_worker(503, error.to_string()))?;
+async fn status(_state: PluginState) -> ApiResult {
     json_reply(&json!({
-        "ready": health.get("ready").and_then(Value::as_bool).unwrap_or(false),
-        "workerImageDigest": state.worker_image_digest,
+        "ready": true,
+        "transport": "host.http",
     }))
 }
 
 async fn basispoints_responses(
-    state: PluginState,
+    _state: PluginState,
     call: TypedCall<ManagementRequest>,
 ) -> ApiResult {
     let wrapper: BasispointsRequest = decode_json(&call)?;
@@ -80,39 +67,17 @@ async fn basispoints_responses(
     if !wrapper.request.is_object() {
         return Err(ApiError::invalid("Responses 请求必须是 JSON 对象"));
     }
-    let resolved = resolve_access_token(&call, &wrapper.account_id).await?;
-    let mut forwarded = serde_json::to_value(&wrapper)
-        .map_err(|_| ApiError::new(500, "encoding", "请求编码失败"))?;
-    forwarded["accessToken"] = Value::String(resolved.access_token);
-    if let Some(account_id) = resolved.chatgpt_account_id {
-        forwarded["chatgptAccountId"] = Value::String(account_id);
-    }
-    let body = serde_json::to_vec(&forwarded)
-        .map_err(|_| ApiError::new(500, "encoding", "请求编码失败"))?;
-    let synthetic = ManagementRequest {
-        method: "POST".to_owned(),
-        path: "api/basispoints/responses".to_owned(),
-        query: String::new(),
-        content_type: Some("application/json".to_owned()),
-        headers: call.request.headers,
-    };
-    let response = state
-        .worker
-        .forward(&synthetic, &body)
+    let credential = resolve_credential(&call, &wrapper.account_id).await?;
+    let response = basispoints::request(&call.host, &credential, wrapper.request)
         .await
-        .map_err(map_basispoints_worker_error)?;
+        .map_err(map_basispoints_error)?;
     raw_response(response.status, &response.content_type, response.body)
 }
 
-struct ResolvedCredential {
-    access_token: String,
-    chatgpt_account_id: Option<String>,
-}
-
-async fn resolve_access_token(
+async fn resolve_credential(
     call: &TypedCall<ManagementRequest>,
     account_id: &str,
-) -> Result<ResolvedCredential, ApiError> {
+) -> Result<AuthCredential, ApiError> {
     let payload = serde_json::to_vec(&AuthGetRequest {
         account_id: account_id.to_owned(),
     })
@@ -145,35 +110,31 @@ async fn resolve_access_token(
     {
         return Err(ApiError::invalid("宿主账号不是 OpenAI OAuth 账号"));
     }
-    let access_token = credential
+    if !credential
         .facts
         .material
         .get("accessToken")
         .or_else(|| credential.facts.material.get("access_token"))
         .and_then(Value::as_str)
-        .filter(|token| !token.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| ApiError::invalid("宿主账号没有可用 access token"))?;
-    Ok(ResolvedCredential {
-        access_token,
-        chatgpt_account_id: credential.facts.upstream_account_id,
-    })
+        .is_some_and(|token| !token.is_empty())
+    {
+        return Err(ApiError::invalid("宿主账号没有可用 access token"));
+    }
+    Ok(credential)
 }
 
-fn map_basispoints_worker_error(error: WorkerError) -> ApiError {
+fn map_basispoints_error(error: BasispointsError) -> ApiError {
     match error {
-        WorkerError::RequestTooLarge => {
-            ApiError::new(413, "payload_too_large", "请求正文超过 Worker 限制")
+        BasispointsError::InvalidRequest(message) => ApiError::invalid(message),
+        BasispointsError::UnsupportedResponse => ApiError::new(
+            502,
+            "upstream_response",
+            "Basis Points 返回了不支持的内容类型",
+        ),
+        BasispointsError::ResponseTooLarge => {
+            ApiError::new(502, "upstream_response", "Basis Points 响应超过插件限制")
         }
-        WorkerError::ResponseTooLarge => {
-            ApiError::new(502, "worker_response", "Worker 响应超过插件限制")
-        }
-        WorkerError::InvalidBaseUrl
-        | WorkerError::InvalidPath
-        | WorkerError::Transport
-        | WorkerError::InvalidResponse => {
-            ApiError::new(503, "worker_unavailable", "Worker 暂时不可用")
-        }
+        BasispointsError::Upstream => ApiError::new(502, "upstream", "Basis Points 请求失败"),
     }
 }
 

@@ -18,12 +18,13 @@
 ```
 
 插件通过 RS 的 `host.auth.get` 宿主回调读取请求的 OpenAI OAuth 账号，解析
-`access_token` 和 JWT 的 `claims["https://api.openai.com/auth"].chatgpt_account_id`，再将
-凭据仅通过本机内部通道交给 Worker，固定请求
+`access_token` 和 JWT 的 `claims["https://api.openai.com/auth"].chatgpt_account_id`，再由
+RS SDK 的 `host.http` 直接固定请求
 [`https://bps.openai.com/basispoints/api/responses`](https://bps.openai.com/basispoints/api/responses)。
-Worker 会为普通 Responses 请求补齐 Basis Points 所需的 `model_selection`、`stream`、`store`、
+插件会为普通 Responses 请求补齐 Basis Points 所需的 `model_selection`、`stream`、`store`、
 `reasoning_effort` 和会话 `metadata` 字段，并发送 Excel 客户端请求头。调用方不能提交 token、
-目标 URL 或代理设置。上游 JSON/SSE 状态码和正文会保留，正文上限为 2 MiB。
+目标 URL 或代理设置。上游 JSON/SSE 状态码和正文会保留，正文上限为 2 MiB。access token 不会
+经过 loopback Worker，也不会写入插件配置或日志。
 
 ## 本地验证
 
@@ -48,14 +49,11 @@ cargo +1.97.0 install --locked --git https://github.com/zyycn/codex-proxy-rs.git
 PLUGIN_CLI="$PWD/.tools/bin/cpr-plugin" bash scripts/package.sh
 ```
 
-产物包含独立的 RS 插件归档、Worker bundle、摘要清单和 SHA-256 文件。
+产物包含独立的 RS 插件归档、兼容性 Worker bundle、摘要清单和 SHA-256 文件。RS 插件本身不依赖
+Worker。
 
 ## 安装
 
 在 RS 的「插件管理」上传 BPS 插件归档，确认插件 ID 为
-`david1989sky.codex-proxy-basispoints`。Worker 使用
-`http://127.0.0.1:28082`，可用 [`ops/companion-install.sh`](ops/companion-install.sh)
-和 [`ops/companion-update.sh`](ops/companion-update.sh) 部署固定摘要的镜像。
-
-插件只接受本机 Worker 地址。管理入口由 RS 管理员会话保护，账号凭据由宿主回调授权；Worker 不读取浏览器 Cookie，
-不挂载凭据目录或密钥文件。
+`david1989sky.codex-proxy-basispoints`。管理入口由 RS 管理员会话保护，账号凭据由宿主回调授权。
+插件不读取浏览器 Cookie，不挂载凭据目录或密钥文件，也不需要额外的 Worker 地址配置。

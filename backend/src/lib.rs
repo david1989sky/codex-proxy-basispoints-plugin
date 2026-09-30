@@ -1,6 +1,6 @@
 mod app;
+mod basispoints;
 mod management;
-mod worker_client;
 
 pub const PLUGIN_ID: &str = "david1989sky.codex-proxy-basispoints";
 
@@ -11,4 +11,3 @@ pub fn author_manifest() -> Result<gateway_plugin_sdk::Manifest, gateway_plugin_
 
 pub use app::plugin;
 pub use management::PluginState;
-pub use worker_client::WorkerClient;
