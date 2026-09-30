@@ -3,7 +3,7 @@
   "name": "codex-proxy-basispoints",
   "displayName": "Basis Points Responses",
   "publisher": "david1989sky",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Codex Proxy RS Basis Points Responses companion 插件",
   "license": "Apache-2.0",
   "author": "david1989sky",
@@ -13,10 +13,24 @@
   "main": "bin/plugin",
   "runtime": "trustedProcess",
   "contributes": {
-    "management": {}
+    "management": {},
+    "middleware": {
+      "version": 3,
+      "stages": ["request"],
+      "inputFormats": ["openai"],
+      "outputFormats": ["openai"]
+    }
   },
   "configurationSchema": {
     "type": "object",
+    "properties": {
+      "enabled": {"type": "boolean"},
+      "models": {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "uniqueItems": true
+      }
+    },
     "additionalProperties": false
   }
 }

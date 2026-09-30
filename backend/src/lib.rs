@@ -1,6 +1,8 @@
 mod app;
 mod basispoints;
+mod config;
 mod management;
+mod middleware;
 pub mod relay;
 pub mod sse;
 mod tool_adapter;

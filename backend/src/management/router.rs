@@ -6,16 +6,22 @@ use gateway_plugin_sdk::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
-use crate::basispoints::{self, BasispointsError};
+use crate::{
+    basispoints::{self, BasispointsError},
+    config::BpsConfig,
+};
 
 use super::{
     response::{ApiError, ApiResult, json_reply, raw_response},
     validation::{MAXIMUM_BODY_BYTES, bounded_id, decode_json, require_no_query},
 };
 
-#[derive(Clone, Default)]
-pub struct PluginState;
+#[derive(Clone)]
+pub struct PluginState {
+    pub(crate) config: Arc<BpsConfig>,
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -25,8 +31,10 @@ struct BasispointsRequest {
 }
 
 impl PluginState {
-    pub fn new() -> Self {
-        Self
+    pub fn new(configuration: Value) -> Self {
+        Self {
+            config: Arc::new(BpsConfig::from_value(&configuration)),
+        }
     }
 }
 
@@ -53,6 +61,8 @@ async fn status(_state: PluginState) -> ApiResult {
     json_reply(&json!({
         "ready": true,
         "transport": "host.http",
+        "middleware": true,
+        "middlewareStage": "request"
     }))
 }
 

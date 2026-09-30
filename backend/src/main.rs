@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err(SessionError::Handshake.into());
     }
-    let state = PluginState::new();
+    let state = PluginState::new(handshake.configuration.clone());
     session.run(plugin(state)?).await?;
     Ok(())
 }

@@ -2,9 +2,16 @@
 
 这是一个独立的 Basis Points Responses companion 插件，插件 ID 为
 `david1989sky.codex-proxy-basispoints`。它通过 RS 管理会话转发 Responses 请求并转换客户端工具调用，
-不包含账号管理或浏览器授权页面。
+并可在 request 中间件阶段接管配置模型的 Responses 请求。不包含账号管理或浏览器授权页面。
+
+默认配置会接管 `gpt-6-sol`、`gpt-6-astra`、`gpt-5.6-sol` 和 `gpt-6-luna`，其他模型继续走 RS 原生 Provider。
+可在插件配置中设置 `enabled` 和 `models`；`gpt-6.1-sol` 不在默认列表中，需先通过 BPS canary 确认可用后再加入。
 
 ## 功能
+
+插件声明 RS `middleware` v3 的 `request` 阶段。被配置模型的普通 Responses 请求会由插件读取宿主 OAuth
+凭据后直接发送到 BPS，并将 BPS JSON/SSE 响应返回给客户端；未命中模型列表的请求原样交给 RS 原生 Provider。
+`GET api/status` 会报告 `middleware: true`，但只有命中模型列表的请求才会实际走 BPS。
 
 插件提供受 RS 管理会话保护的 `POST api/basispoints/responses` 接口，请求体为：
 
