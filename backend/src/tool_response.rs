@@ -121,6 +121,7 @@ pub(crate) fn transform(
                     if !is_native_event(&kind, &value) {
                         if let Some(snapshot) = value.get_mut("response") {
                             remove_tools(snapshot)?;
+                            context.restore_metadata(snapshot);
                         }
                         output.event(&kind, value)?;
                     }
@@ -176,10 +177,12 @@ fn complete_response(
     if status == "completed" {
         let mut response = context.transform_response(response)?.response;
         response["status"] = json!("completed");
+        context.restore_metadata(&mut response);
         return Ok(response);
     }
     let mut response = response.clone();
     remove_tools(&mut response)?;
+    context.restore_metadata(&mut response);
     Ok(response)
 }
 
@@ -781,6 +784,117 @@ mod tests {
     fn assert_sequences(events: &[Value]) {
         for (index, event) in events.iter().enumerate() {
             assert_eq!(event["sequence_number"].as_u64(), Some(index as u64));
+        }
+    }
+
+    fn upstream_metadata(mut response: Value) -> Value {
+        response["tools"] = json!([{"type":"function","name":"run_officejs"}]);
+        response["instructions"] = json!("Internal Office instructions");
+        response["tool_choice"] = json!("auto");
+        response["parallel_tool_calls"] = json!(true);
+        response["tool_usage"] =
+            json!({"image_gen":{"total_tokens":0},"web_search":{"num_requests":0}});
+        response
+    }
+
+    #[test]
+    fn relay_json_restores_original_caller_metadata_and_additional_tools() {
+        let relay = ToolRelay::new();
+        let source = json!({
+            "tools":[{"type":"namespace","name":"utils","tools":[
+                {"type":"function","name":"exec","parameters":{"type":"object"}}
+            ]}],
+            "input":[{"type":"additional_tools","tools":[{"type":"custom","name":"patch"}]}],
+            "instructions":"Caller instructions",
+            "tool_choice":{"type":"function","name":"exec","namespace":"utils"},
+            "parallel_tool_calls":false
+        });
+        let context = relay.prepare_source(&source).unwrap().context;
+        let body = upstream_metadata(response("completed", "utils.exec", "{}"));
+        let (_, bytes) = transform(
+            &context,
+            false,
+            "application/json",
+            body.to_string().as_bytes(),
+        )
+        .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            value["tools"],
+            json!([source["tools"][0], source["input"][0]["tools"][0]])
+        );
+        assert_eq!(value["instructions"], source["instructions"]);
+        assert_eq!(value["tool_choice"], source["tool_choice"]);
+        assert_eq!(value["parallel_tool_calls"], false);
+        assert_eq!(value["tool_usage"], body["tool_usage"]);
+        assert!(!String::from_utf8(bytes).unwrap().contains("run_officejs"));
+    }
+
+    #[test]
+    fn relay_sse_restores_metadata_on_every_response_snapshot() {
+        let relay = ToolRelay::new();
+        let source = json!({"tools":[{"type":"custom","name":"patch"}],
+            "instructions":"Caller instructions","tool_choice":{"type":"custom","name":"patch"},
+            "parallel_tool_calls":false});
+        let context = relay.prepare_source(&source).unwrap().context;
+        for status in ["completed", "failed"] {
+            let mut body = String::new();
+            for kind in ["response.created", "response.in_progress"] {
+                body.push_str(&frame(
+                    kind,
+                    json!({"type":kind,"response":upstream_metadata(json!({
+                    "id":"resp_1","status":"in_progress","output":[]}))}),
+                ));
+            }
+            let terminal = format!("response.{status}");
+            body.push_str(&frame(
+                &terminal,
+                json!({"type":terminal,"response":upstream_metadata(
+                response(status,"patch","raw custom input"))}),
+            ));
+            let (_, bytes) =
+                transform(&context, true, "text/event-stream", body.as_bytes()).unwrap();
+            for event in events(&bytes) {
+                if let Some(snapshot) = event.get("response") {
+                    assert_eq!(snapshot["tools"], source["tools"]);
+                    assert_eq!(snapshot["instructions"], source["instructions"]);
+                    assert_eq!(snapshot["tool_choice"], source["tool_choice"]);
+                    assert_eq!(snapshot["parallel_tool_calls"], false);
+                    assert_eq!(
+                        snapshot["tool_usage"],
+                        json!({"image_gen":{"total_tokens":0},"web_search":{"num_requests":0}})
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn history_without_current_catalog_restores_empty_tools_and_metadata_defaults() {
+        let relay = ToolRelay::new();
+        let context = relay
+            .prepare_source(&json!({"input":[
+                {"type":"function_call","name":"exec","call_id":"call_1","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_1","output":"ok"}
+            ]}))
+            .unwrap()
+            .context;
+        assert!(context.is_active());
+        for status in ["completed", "failed"] {
+            let body =
+                upstream_metadata(json!({"id":"resp_1","status":status,"output":[message()]}));
+            let (_, bytes) = transform(
+                &context,
+                false,
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["tools"], json!([]));
+            assert_eq!(value["instructions"], Value::Null);
+            assert_eq!(value["tool_choice"], "auto");
+            assert_eq!(value["parallel_tool_calls"], true);
         }
     }
 

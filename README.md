@@ -29,10 +29,11 @@ RS SDK 的 `host.http` 直接固定请求
 
 ## 能力边界
 
-v0.1.6 支持字符串 `input`、标准 Responses message 数组、多轮上下文，以及客户端 `function`、
+v0.1.7 支持字符串 `input`、标准 Responses message 数组、多轮上下文，以及客户端 `function`、
 `custom` 和 `namespace` 工具。插件将工具目录和选择要求映射到 BPS 原生 `run_officejs` 协议，
 再把返回值转换为标准 `function_call` / `custom_tool_call`。客户端负责执行工具并回传结果；
 插件不会执行工具，也不会运行上游返回的 Office 或 JavaScript 代码。
+中继响应的工具目录、选择方式、并行设置和 instructions 与调用方请求一致，包括 SSE 各响应快照。
 
 每次请求都需携带完整历史，包括上一轮的完整 `response.output` 和对应工具结果。插件按请求
 重建中继状态，不使用跨请求长期缓存；非 `null` 的 `previous_response_id` 会被拒绝。
@@ -46,8 +47,11 @@ v0.1.6 支持字符串 `input`、标准 Responses message 数组、多轮上下�
 带工具中继的请求先缓冲完整上游响应（上限 2 MiB），校验后返回 JSON 或生成标准工具调用 SSE
 事件。因此 `stream: true` 的工具请求不会实时返回首 token。普通请求保持原有 JSON/SSE 行为。
 
-模型是否可用由 BPS 上游和宿主账号决定；`gpt-6-sol` 已验证可调用。`model_not_found` 表示
-上游模型不可用，不应据此推断工具中继失败，也不提供未经验证的完整模型列表。
+模型是否可用由 BPS 上游和宿主账号决定，插件不会把模型名限定为固定列表。
+2026-09-30 已实测 `gpt-6-sol`、`gpt-5.6-sol`、`gpt-6-astra` 和 `gpt-6-luna` 可调用；
+`gpt-6.1-sol` 当时返回 `403 basispoints_model_access_changed`。
+宿主账号的模型目录不等于 BPS 可用模型列表。`model_not_found` 或模型权限错误由上游返回，
+不应据此推断工具中继失败。
 
 ## 工具调用示例
 

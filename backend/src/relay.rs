@@ -231,6 +231,7 @@ impl ToolRelay {
 
         let history_has_relay = input_has_relay_items(source.get("input"));
         let active = history_has_relay || !declared.is_empty();
+        let caller_tools = caller_tool_catalog(source);
         let context = RelayContext {
             declared,
             callable,
@@ -242,6 +243,8 @@ impl ToolRelay {
                 .unwrap_or(true),
             cache: Arc::clone(&self.cache),
             active,
+            caller_tools,
+            caller_instructions: source.get("instructions").cloned(),
         };
         let input = context.rewrite_input(source.get("input"))?;
         let developer_instructions = if context.active {
@@ -267,6 +270,8 @@ impl ToolRelay {
             parallel_tool_calls: true,
             cache: Arc::clone(&self.cache),
             active: input_has_relay_items(input),
+            caller_tools: Value::Array(Vec::new()),
+            caller_instructions: None,
         };
         context.rewrite_input(input)
     }
@@ -313,6 +318,8 @@ pub struct RelayContext {
     parallel_tool_calls: bool,
     cache: Arc<Mutex<NativeCallCache>>,
     active: bool,
+    caller_tools: Value,
+    caller_instructions: Option<Value>,
 }
 
 impl RelayContext {
@@ -350,6 +357,27 @@ impl RelayContext {
     #[must_use]
     pub fn tool_choice(&self) -> Option<&Value> {
         self.choice.as_ref()
+    }
+
+    /// Restores caller-visible request metadata after native BPS processing.
+    pub(crate) fn restore_metadata(&self, response: &mut Value) {
+        if let Some(object) = response.as_object_mut() {
+            object.insert("tools".to_owned(), self.caller_tools.clone());
+            object.insert(
+                "instructions".to_owned(),
+                self.caller_instructions.clone().unwrap_or(Value::Null),
+            );
+            object.insert(
+                "tool_choice".to_owned(),
+                self.choice
+                    .clone()
+                    .unwrap_or_else(|| Value::String("auto".to_owned())),
+            );
+            object.insert(
+                "parallel_tool_calls".to_owned(),
+                Value::Bool(self.parallel_tool_calls),
+            );
+        }
     }
 
     /// Builds the stable CPA-style developer relay contract.
@@ -616,6 +644,23 @@ fn parse_catalog(source: &Map<String, Value>) -> Result<BTreeMap<String, ToolSpe
         }
     }
     Ok(result)
+}
+
+fn caller_tool_catalog(source: &Map<String, Value>) -> Value {
+    let mut tools = Vec::new();
+    if let Some(Value::Array(items)) = source.get("tools") {
+        tools.extend(items.iter().cloned());
+    }
+    if let Some(items) = source.get("input").and_then(Value::as_array) {
+        for item in items {
+            if item.get("type").and_then(Value::as_str) == Some("additional_tools")
+                && let Some(Value::Array(extra)) = item.get("tools")
+            {
+                tools.extend(extra.iter().cloned());
+            }
+        }
+    }
+    Value::Array(tools)
 }
 
 fn parse_tool_list(
