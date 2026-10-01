@@ -7,6 +7,7 @@ pub mod relay;
 pub mod sse;
 mod tool_adapter;
 mod tool_response;
+pub(crate) mod usage;
 
 pub const PLUGIN_ID: &str = "david1989sky.codex-proxy-basispoints";
 
