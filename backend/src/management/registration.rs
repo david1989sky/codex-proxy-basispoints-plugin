@@ -1,5 +1,7 @@
 use super::response::JSON_CONTENT_TYPE;
-use gateway_plugin_sdk::call::management::{ManagementRegistration, ManagementRoute};
+use gateway_plugin_sdk::call::management::{
+    ManagementPage, ManagementRegistration, ManagementResource, ManagementRoute,
+};
 
 pub(crate) fn registration() -> ManagementRegistration {
     let get = |path: &str| ManagementRoute {
@@ -11,6 +13,7 @@ pub(crate) fn registration() -> ManagementRegistration {
     ManagementRegistration {
         routes: vec![
             get("api/status"),
+            get("api/usage"),
             ManagementRoute {
                 method: "POST".to_owned(),
                 path: "api/basispoints/responses".to_owned(),
@@ -21,8 +24,27 @@ pub(crate) fn registration() -> ManagementRegistration {
                 ],
             },
         ],
-        resources: Vec::new(),
-        pages: Vec::new(),
+        resources: vec![
+            ManagementResource {
+                path: "web/index.html".to_owned(),
+                public: false,
+            },
+            ManagementResource {
+                path: "web/app.js".to_owned(),
+                public: false,
+            },
+            ManagementResource {
+                path: "web/app.css".to_owned(),
+                public: false,
+            },
+        ],
+        pages: vec![ManagementPage {
+            id: "usage".to_owned(),
+            title: "BPS 通道使用情况".to_owned(),
+            description: Some("查看当前插件进程的 BPS 请求统计".to_owned()),
+            entry: "web/index.html".to_owned(),
+            icon: None,
+        }],
         callbacks: Vec::new(),
     }
 }
@@ -45,8 +67,37 @@ mod tests {
             route.response_content_types,
             vec!["application/json", "text/event-stream"]
         );
-        assert_eq!(registration.routes.len(), 2);
-        assert!(registration.resources.is_empty());
-        assert!(registration.pages.is_empty());
+        assert!(
+            registration
+                .routes
+                .iter()
+                .any(|route| route.method == "GET" && route.path == "api/status")
+        );
+        assert!(
+            registration
+                .routes
+                .iter()
+                .any(|route| route.method == "GET" && route.path == "api/usage")
+        );
+        assert_eq!(registration.routes.len(), 3);
+        assert_eq!(
+            registration
+                .resources
+                .iter()
+                .map(|resource| resource.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["web/index.html", "web/app.js", "web/app.css"]
+        );
+        assert!(
+            registration
+                .resources
+                .iter()
+                .all(|resource| !resource.public)
+        );
+        assert_eq!(registration.pages.len(), 1);
+        let page = &registration.pages[0];
+        assert_eq!(page.id, "usage");
+        assert_eq!(page.entry, "web/index.html");
+        assert_eq!(page.title, "BPS 通道使用情况");
     }
 }

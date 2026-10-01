@@ -13,6 +13,20 @@
 凭据后直接发送到 BPS，并将 BPS JSON/SSE 响应返回给客户端；未命中模型列表的请求原样交给 RS 原生 Provider。
 `GET api/status` 会报告 `middleware: true`，但只有命中模型列表的请求才会实际走 BPS。
 
+插件管理页中的「BPS 通道使用情况」会显示当前插件进程的请求总数、成功数、失败数和最近请求时间，
+每 5 秒自动刷新，也可手动刷新。页面只统计真正发起的 BPS 尝试；未命中模型列表的请求不计入。统计数据
+保存在插件进程内，插件重启、升级或重新加载后会清零，不包含请求正文、响应正文、账号标识或 token。
+管理路由 `GET api/usage` 返回相同的聚合数据：
+
+```json
+{
+  "totalRequests": 0,
+  "successfulRequests": 0,
+  "failedRequests": 0,
+  "lastRequestAtMs": null
+}
+```
+
 插件提供受 RS 管理会话保护的 `POST api/basispoints/responses` 接口，请求体为：
 
 ```json

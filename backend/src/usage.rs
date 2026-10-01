@@ -1,7 +1,6 @@
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[allow(dead_code)]
 pub(crate) struct UsageStats {
     total_requests: AtomicU64,
     successful_requests: AtomicU64,
@@ -11,7 +10,6 @@ pub(crate) struct UsageStats {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub(crate) struct UsageSnapshot {
     pub(crate) total_requests: u64,
     pub(crate) successful_requests: u64,
@@ -19,7 +17,6 @@ pub(crate) struct UsageSnapshot {
     pub(crate) last_request_at_ms: Option<u64>,
 }
 
-#[allow(dead_code)]
 impl UsageStats {
     pub(crate) const fn new() -> Self {
         Self {

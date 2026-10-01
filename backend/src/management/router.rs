@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::{
     basispoints::{self, BasispointsError},
     config::BpsConfig,
+    usage::UsageStats,
 };
 
 use super::{
@@ -21,6 +22,7 @@ use super::{
 #[derive(Clone)]
 pub struct PluginState {
     pub(crate) config: Arc<BpsConfig>,
+    pub(crate) usage: Arc<UsageStats>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -34,6 +36,7 @@ impl PluginState {
     pub fn new(configuration: Value) -> Self {
         Self {
             config: Arc::new(BpsConfig::from_value(&configuration)),
+            usage: Arc::new(UsageStats::new()),
         }
     }
 }
@@ -52,6 +55,7 @@ async fn route(state: PluginState, call: TypedCall<ManagementRequest>) -> ApiRes
     require_no_query(&call.request)?;
     match (call.request.method.as_str(), call.request.path.as_str()) {
         ("GET", "api/status") => status(state).await,
+        ("GET", "api/usage") => usage(state).await,
         ("POST", "api/basispoints/responses") => basispoints_responses(state, call).await,
         _ => Err(ApiError::new(404, "not_found", "未找到插件管理接口")),
     }
@@ -64,6 +68,10 @@ async fn status(_state: PluginState) -> ApiResult {
         "middleware": true,
         "middlewareStage": "request"
     }))
+}
+
+async fn usage(state: PluginState) -> ApiResult {
+    json_reply(&state.usage.snapshot())
 }
 
 async fn basispoints_responses(
@@ -168,5 +176,19 @@ mod tests {
         }))
         .expect("wrapper itself should decode");
         assert!(!scalar_request.request.is_object());
+    }
+
+    #[test]
+    fn usage_snapshot_starts_with_the_management_contract_fields() {
+        let state = super::PluginState::new(json!({}));
+        assert_eq!(
+            serde_json::to_value(state.usage.snapshot()).expect("usage snapshot should encode"),
+            json!({
+                "totalRequests": 0,
+                "successfulRequests": 0,
+                "failedRequests": 0,
+                "lastRequestAtMs": null,
+            })
+        );
     }
 }

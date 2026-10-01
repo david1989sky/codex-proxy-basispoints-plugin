@@ -9,11 +9,13 @@ use gateway_plugin_sdk::{
     client::{MiddlewareBody, MiddlewareResponse, RequestCall},
 };
 use serde_json::{Value, json};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     basispoints::{self, BasispointsError},
     management::PluginState,
     sse::SseFrameSplitter,
+    usage::UsageStats,
 };
 
 /// Intercepts only the configured OpenAI Responses models at the selected
@@ -42,9 +44,15 @@ pub(crate) async fn handle(
         .map_err(|_| fault(ErrorCode::InvalidInput, "Responses 请求正文无效"))?;
     let credential =
         resolve_credential(&call.host, call.request.head.account_id.as_deref()).await?;
-    let response = basispoints::request(&call.host, &credential, request)
-        .await
-        .map_err(map_basispoints_error)?;
+    state.usage.begin(now_ms());
+    let response = match basispoints::request(&call.host, &credential, request).await {
+        Ok(response) => response,
+        Err(error) => {
+            state.usage.record_failure();
+            return Err(map_basispoints_error(error));
+        }
+    };
+    record_response(&state.usage, response.status);
     // BPS can reject an otherwise valid OAuth account with a policy response
     // (currently HTTP 403). Delegate to RS's native provider so enabling the
     // plugin does not turn the whole model route into a middleware 502.
@@ -77,6 +85,21 @@ pub(crate) async fn handle(
         headers,
         MiddlewareBody::from_frames(framing, frames),
     ))
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+fn record_response(usage: &UsageStats, status: u16) {
+    if (200..300).contains(&status) {
+        usage.record_success();
+    } else {
+        usage.record_failure();
+    }
 }
 
 fn should_intercept(
@@ -257,7 +280,7 @@ mod tests {
     use super::{
         MiddlewareBodyFraming, MiddlewareMount, response_framing, should_intercept, sse_frames,
     };
-    use crate::PluginState;
+    use crate::{PluginState, usage::UsageStats};
 
     #[test]
     fn request_stage_matches_generate_openai_model() {
@@ -309,5 +332,41 @@ mod tests {
             response_framing(200, "application/json"),
             (false, MiddlewareBodyFraming::JsonDocument)
         );
+    }
+
+    #[test]
+    fn response_statuses_classify_usage_attempts() {
+        let usage = UsageStats::new();
+
+        for status in [200, 201, 299] {
+            usage.begin(1);
+            super::record_response(&usage, status);
+        }
+        for status in [400, 403, 500] {
+            usage.begin(1);
+            super::record_response(&usage, status);
+        }
+
+        let snapshot = usage.snapshot();
+        assert_eq!(snapshot.total_requests, 6);
+        assert_eq!(snapshot.successful_requests, 3);
+        assert_eq!(snapshot.failed_requests, 3);
+    }
+
+    #[test]
+    fn unselected_models_do_not_start_usage_attempts() {
+        let state = PluginState::new(serde_json::json!({
+            "enabled": true,
+            "models": ["gpt-6-astra"]
+        }));
+
+        assert!(!should_intercept(
+            &state,
+            MiddlewareMount::Request,
+            "generate",
+            "openai",
+            Some("gpt-6-sol")
+        ));
+        assert_eq!(state.usage.snapshot().total_requests, 0);
     }
 }

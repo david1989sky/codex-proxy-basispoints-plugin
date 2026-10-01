@@ -23,6 +23,18 @@ fn author_manifest_declares_basispoints_management_contract() {
     assert_eq!(middleware.stages, [Stage::Request]);
     assert_eq!(middleware.input_formats, ["openai"]);
     assert_eq!(middleware.output_formats, ["openai"]);
-    assert!(manifest.resources.is_empty());
+    assert_eq!(manifest.resources.len(), 3);
+    assert_eq!(
+        manifest.resources.get("web/index.html").map(String::as_str),
+        Some("text/html")
+    );
+    assert_eq!(
+        manifest.resources.get("web/app.js").map(String::as_str),
+        Some("text/javascript")
+    );
+    assert_eq!(
+        manifest.resources.get("web/app.css").map(String::as_str),
+        Some("text/css")
+    );
     assert!(manifest.state.is_empty());
 }
