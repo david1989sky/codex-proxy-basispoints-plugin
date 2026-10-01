@@ -132,7 +132,7 @@ export async function requestBasispoints({ accountId, request, chatgptAccountId,
           'x-stainless-package-version': '6.31.0',
           'x-stainless-retry-count': '0',
           'x-stainless-runtime': 'browser:chrome',
-          'user-agent': 'cpr-oai-basispoints/0.1.10',
+          'user-agent': 'cpr-oai-basispoints/0.1.11',
         },
         body: JSON.stringify(normalizeRequest(request)),
       })
