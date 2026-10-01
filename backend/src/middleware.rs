@@ -45,16 +45,13 @@ pub(crate) async fn handle(
     let response = basispoints::request(&call.host, &credential, request)
         .await
         .map_err(map_basispoints_error)?;
-    let is_sse = response
-        .content_type
-        .split(';')
-        .next()
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
-    let framing = if is_sse {
-        MiddlewareBodyFraming::SseEvent
-    } else {
-        MiddlewareBodyFraming::JsonDocument
-    };
+    // BPS can reject an otherwise valid OAuth account with a policy response
+    // (currently HTTP 403). Delegate to RS's native provider so enabling the
+    // plugin does not turn the whole model route into a middleware 502.
+    if response.status == 403 {
+        return call.next.run(call.request).await;
+    }
+    let (is_sse, framing) = response_framing(response.status, &response.content_type);
     let frames = if is_sse {
         sse_frames(&response.body)
     } else {
@@ -121,6 +118,28 @@ fn sse_frames(body: &[u8]) -> Vec<MiddlewareBodyFrame> {
         .enumerate()
         .map(|(index, frame)| MiddlewareBodyFrame::new(frame.bytes, index == last || frame.done))
         .collect()
+}
+
+/// Match RS's response framing contract, including error responses.
+///
+/// The host runtime expects `RawBytes` for every non-2xx short-circuit
+/// response. Returning `JsonDocument` for a JSON 403/5xx is rejected as an
+/// invalid middleware response and becomes the generic 502 seen by clients.
+fn response_framing(status: u16, content_type: &str) -> (bool, MiddlewareBodyFraming) {
+    let is_success = (200..300).contains(&status);
+    let is_sse = is_success
+        && content_type
+            .split(';')
+            .next()
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
+    let framing = if !is_success {
+        MiddlewareBodyFraming::RawBytes
+    } else if is_sse {
+        MiddlewareBodyFraming::SseEvent
+    } else {
+        MiddlewareBodyFraming::JsonDocument
+    };
+    (is_sse, framing)
 }
 
 async fn resolve_credential(
@@ -235,7 +254,9 @@ fn fault(code: ErrorCode, message: &'static str) -> PluginFault {
 
 #[cfg(test)]
 mod tests {
-    use super::{MiddlewareMount, should_intercept, sse_frames};
+    use super::{
+        MiddlewareBodyFraming, MiddlewareMount, response_framing, should_intercept, sse_frames,
+    };
     use crate::PluginState;
 
     #[test]
@@ -272,5 +293,21 @@ mod tests {
         let frames = sse_frames(b"event: response.output_text.delta\ndata: {}\n\n");
         assert_eq!(frames.len(), 1);
         assert!(frames[0].terminal);
+    }
+
+    #[test]
+    fn non_success_responses_use_raw_bytes_framing() {
+        assert_eq!(
+            response_framing(403, "application/json; charset=utf-8"),
+            (false, MiddlewareBodyFraming::RawBytes)
+        );
+        assert_eq!(
+            response_framing(200, "text/event-stream"),
+            (true, MiddlewareBodyFraming::SseEvent)
+        );
+        assert_eq!(
+            response_framing(200, "application/json"),
+            (false, MiddlewareBodyFraming::JsonDocument)
+        );
     }
 }
