@@ -4,6 +4,9 @@
 `david1989sky.codex-proxy-basispoints`。它通过 RS 管理会话转发 Responses 请求并转换客户端工具调用，
 并可在 request 中间件阶段接管配置模型的 Responses 请求。不包含账号管理或浏览器授权页面。
 
+`v0.1.13` 对齐 Sub4API BPS transport 的错误透传行为：非 2xx 响应保留上游状态码、内容类型和正文，
+并在宿主账号提供 `upstream_user_id` 时发送 `x-openai-account-user-id`。
+
 默认配置会接管 `gpt-6-sol`、`gpt-6-astra`、`gpt-5.6-sol` 和 `gpt-6-luna`，其他模型继续走 RS 原生 Provider。
 可在插件配置中设置 `enabled` 和 `models`；`gpt-6.1-sol` 不在默认列表中，需先通过 BPS canary 确认可用后再加入。
 

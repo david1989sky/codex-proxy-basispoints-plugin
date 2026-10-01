@@ -63,7 +63,9 @@ pub(super) fn raw_response(
         .next()
         .map(str::trim)
         .unwrap_or_default();
-    if !media_type.eq_ignore_ascii_case("application/json")
+    let is_success = (200..300).contains(&status);
+    if is_success
+        && !media_type.eq_ignore_ascii_case("application/json")
         && !media_type.eq_ignore_ascii_case("text/event-stream")
     {
         return Err(ApiError::new(
@@ -72,14 +74,24 @@ pub(super) fn raw_response(
             "Worker 返回了不支持的内容类型",
         ));
     }
-    let normalized_content_type = if media_type.eq_ignore_ascii_case("application/json") {
-        JSON_CONTENT_TYPE
+    let normalized_content_type = if is_success {
+        if media_type.eq_ignore_ascii_case("application/json") {
+            JSON_CONTENT_TYPE.to_owned()
+        } else {
+            "text/event-stream".to_owned()
+        }
+    } else if media_type.eq_ignore_ascii_case("application/json") {
+        JSON_CONTENT_TYPE.to_owned()
+    } else if media_type.eq_ignore_ascii_case("text/event-stream") {
+        "text/event-stream".to_owned()
+    } else if content_type.trim().is_empty() {
+        "application/octet-stream".to_owned()
     } else {
-        "text/event-stream"
+        content_type.to_owned()
     };
     Ok(TypedReply::new(ManagementResponse {
         status,
-        content_type: normalized_content_type.to_owned(),
+        content_type: normalized_content_type,
         headers: vec![
             gateway_plugin_sdk::call::middleware::MiddlewareHeader {
                 name: "Cache-Control".to_owned(),
@@ -159,5 +171,24 @@ mod tests {
         assert_eq!(error.status, 502);
         assert_eq!(error.code, "worker_response");
         assert_eq!(error.message, "Worker 返回了不支持的内容类型");
+    }
+
+    #[test]
+    fn preserves_non_success_error_content_type_and_body() {
+        let reply = match raw_response(
+            403,
+            "text/plain; charset=utf-8",
+            b"This request was blocked by our usage policy".to_vec(),
+        ) {
+            Ok(reply) => reply,
+            Err(_) => panic!("non-success responses should preserve upstream diagnostics"),
+        };
+
+        assert_eq!(reply.result.status, 403);
+        assert_eq!(reply.result.content_type, "text/plain; charset=utf-8");
+        assert_eq!(
+            reply.payload,
+            b"This request was blocked by our usage policy"
+        );
     }
 }

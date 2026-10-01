@@ -72,82 +72,86 @@ pub(crate) async fn request(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let mut headers = vec![
+        ("authorization".to_owned(), format!("Bearer {token}")),
+        ("chatgpt-account-id".to_owned(), account_id.clone()),
+        ("x-openai-account-id".to_owned(), account_id),
+        ("x-basispoints-auth-mode".to_owned(), "chatgpt".to_owned()),
+        ("content-type".to_owned(), "application/json".to_owned()),
+        ("accept-encoding".to_owned(), "identity".to_owned()),
+        (
+            "accept".to_owned(),
+            if stream {
+                "text/event-stream".to_owned()
+            } else {
+                "application/json".to_owned()
+            },
+        ),
+        ("origin".to_owned(), "https://bps.openai.com".to_owned()),
+        (
+            "x-openai-internal-basispoints-client-agent-profile".to_owned(),
+            "excel".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-client-editor".to_owned(),
+            "excel".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-client-host".to_owned(),
+            "office".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-client-platform".to_owned(),
+            "excel".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-client-platform-class".to_owned(),
+            "PC".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-client-product".to_owned(),
+            "basispoints-excel-plugin".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-client-runtime".to_owned(),
+            "desktop".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-office-host".to_owned(),
+            "Excel".to_owned(),
+        ),
+        (
+            "x-openai-internal-basispoints-office-platform".to_owned(),
+            "PC".to_owned(),
+        ),
+        ("x-stainless-arch".to_owned(), "unknown".to_owned()),
+        // Basis Points' Excel transport uses the browser JavaScript
+        // Stainless profile even when the host plugin is written in Rust.
+        ("x-stainless-lang".to_owned(), "js".to_owned()),
+        ("x-stainless-os".to_owned(), "Unknown".to_owned()),
+        (
+            "x-stainless-package-version".to_owned(),
+            "6.31.0".to_owned(),
+        ),
+        ("x-stainless-retry-count".to_owned(), "0".to_owned()),
+        (
+            "x-stainless-runtime".to_owned(),
+            "browser:chrome".to_owned(),
+        ),
+        (
+            "user-agent".to_owned(),
+            format!("cpr-oai-basispoints/{}", env!("CARGO_PKG_VERSION")),
+        ),
+    ];
+    if let Some(user_id) = upstream_user_id_header(credential) {
+        headers.push(("x-openai-account-user-id".to_owned(), user_id.to_owned()));
+    }
     let response = host
         .http(
             HttpRequest {
                 method: "POST".to_owned(),
                 url: BASISPOINTS_URL.to_owned(),
-                headers: vec![
-                    ("authorization".to_owned(), format!("Bearer {token}")),
-                    ("chatgpt-account-id".to_owned(), account_id.clone()),
-                    ("x-openai-account-id".to_owned(), account_id),
-                    ("x-basispoints-auth-mode".to_owned(), "chatgpt".to_owned()),
-                    ("content-type".to_owned(), "application/json".to_owned()),
-                    ("accept-encoding".to_owned(), "identity".to_owned()),
-                    (
-                        "accept".to_owned(),
-                        if stream {
-                            "text/event-stream".to_owned()
-                        } else {
-                            "application/json".to_owned()
-                        },
-                    ),
-                    ("origin".to_owned(), "https://bps.openai.com".to_owned()),
-                    (
-                        "x-openai-internal-basispoints-client-agent-profile".to_owned(),
-                        "excel".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-client-editor".to_owned(),
-                        "excel".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-client-host".to_owned(),
-                        "office".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-client-platform".to_owned(),
-                        "excel".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-client-platform-class".to_owned(),
-                        "PC".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-client-product".to_owned(),
-                        "basispoints-excel-plugin".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-client-runtime".to_owned(),
-                        "desktop".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-office-host".to_owned(),
-                        "Excel".to_owned(),
-                    ),
-                    (
-                        "x-openai-internal-basispoints-office-platform".to_owned(),
-                        "PC".to_owned(),
-                    ),
-                    ("x-stainless-arch".to_owned(), "unknown".to_owned()),
-                    // Basis Points' Excel transport uses the browser JavaScript
-                    // Stainless profile even when the host plugin is written in Rust.
-                    ("x-stainless-lang".to_owned(), "js".to_owned()),
-                    ("x-stainless-os".to_owned(), "Unknown".to_owned()),
-                    (
-                        "x-stainless-package-version".to_owned(),
-                        "6.31.0".to_owned(),
-                    ),
-                    ("x-stainless-retry-count".to_owned(), "0".to_owned()),
-                    (
-                        "x-stainless-runtime".to_owned(),
-                        "browser:chrome".to_owned(),
-                    ),
-                    (
-                        "user-agent".to_owned(),
-                        format!("cpr-oai-basispoints/{}", env!("CARGO_PKG_VERSION")),
-                    ),
-                ],
+                headers,
             },
             body,
         )
@@ -165,7 +169,7 @@ pub(crate) async fn request(
         .map(str::trim)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if media_type != "application/json" && media_type != "text/event-stream" {
+    if !accepts_content_type(response.status, &media_type) {
         let mut body = response.body;
         let _ = body.close().await;
         return Err(BasispointsError::UnsupportedResponse);
@@ -198,6 +202,21 @@ pub(crate) async fn request(
         },
         body,
     })
+}
+
+fn accepts_content_type(status: u16, media_type: &str) -> bool {
+    !(200..300).contains(&status)
+        || media_type.eq_ignore_ascii_case("application/json")
+        || media_type.eq_ignore_ascii_case("text/event-stream")
+}
+
+fn upstream_user_id_header(credential: &AuthCredential) -> Option<&str> {
+    credential
+        .facts
+        .upstream_user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn normalize_request(mut request: Value) -> Result<Value, BasispointsError> {
@@ -387,8 +406,41 @@ fn map_body_error(error: PluginFault) -> BasispointsError {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_request;
+    use super::{accepts_content_type, normalize_request, upstream_user_id_header};
+    use gateway_plugin_sdk::call::host::AuthCredential;
     use serde_json::json;
+
+    #[test]
+    fn accepts_any_content_type_for_non_success_responses() {
+        assert!(accepts_content_type(403, "text/plain"));
+        assert!(accepts_content_type(403, ""));
+        assert!(!accepts_content_type(200, "text/plain"));
+        assert!(accepts_content_type(200, "application/json"));
+    }
+
+    #[test]
+    fn forwards_upstream_user_id_when_host_provides_one() {
+        let credential: AuthCredential = serde_json::from_value(json!({
+            "account_id": "acct-1",
+            "provider_id": "openai",
+            "credential_revision": 1,
+            "facts": {
+                "name": "test",
+                "authentication_kind": "oauth",
+                "material": {},
+                "email": null,
+                "upstream_user_id": "user-1",
+                "upstream_account_id": "acct-1",
+                "plan_type": null,
+                "has_refresh_token": false,
+                "access_token_expires_at_ms": null,
+                "next_refresh_at_ms": null
+            }
+        }))
+        .expect("credential fixture should decode");
+
+        assert_eq!(upstream_user_id_header(&credential), Some("user-1"));
+    }
 
     #[test]
     fn normalizes_string_input_to_basispoints_message_item() {
